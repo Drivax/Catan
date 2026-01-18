@@ -1,0 +1,1 @@
+Implementation attempt of a catan game simulator from scratch
