@@ -1,5 +1,5 @@
 from collections import Counter
-from game.rules import COST_ROAD, COST_SETTLEMENT, COST_CITY, VICTORY_POINTS_TO_WIN
+from game.rules import COST_ROAD, COST_SETTLEMENT, COST_CITY, VICTORY_POINTS_TO_WIN,POINTS_DIC
 
 class Player:
     def __init__(self, pid):
@@ -29,6 +29,7 @@ class Player:
         self.resources -= COST_ROAD
         self.roads_built += 1
         self.roads_left -= 1
+        self.victory_points += POINTS_DIC["road"]
         return True
 
     def build_settlement(self):
@@ -37,7 +38,7 @@ class Player:
         self.resources -= COST_SETTLEMENT
         self.settlements_built += 1
         self.settlements_left -= 1
-        self.victory_points += 1
+        self.victory_points += POINTS_DIC["colony"]
         return True
 
     def build_city(self):
@@ -46,7 +47,7 @@ class Player:
         self.resources -= COST_CITY
         self.cities_built += 1
         self.cities_left -= 1
-        self.victory_points += 1  # +1
+        self.victory_points += POINTS_DIC["city"]
         return True
 
     def add_resources(self, counter):

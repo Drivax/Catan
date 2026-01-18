@@ -15,9 +15,25 @@ class CatanGame:
         self.agents=agents
         self.players = [Player(i) for i in range(num_players)]
         self.board = Board()
+        self.setup()
         self.current_player = 0
         self.turn_number = 0
         self.winner = None
+
+    def setup(self):
+        all_vertices = self.board.get_all_vertices()
+        random.shuffle(all_vertices)
+        
+        vertex_index = 0
+        for pid in range(self.num_players):
+            for _ in range(2):  
+                while vertex_index < len(all_vertices):
+                    vkey = all_vertices[vertex_index]
+                    vertex_index += 1
+                    if vkey not in self.board.buildings:
+                        self.board.place_settlement(pid, vkey)
+                        self.players[pid].build_settlement()
+                        break
 
     def roll_dice(self):
         return random.randint(1,6) + random.randint(1,6)
@@ -30,19 +46,28 @@ class CatanGame:
         print(f"[{self.turn_number:3d}] Player {self.current_player} rolls a  {dice}")
 
         if dice == 7:
-            # TEMPORARY simplified robber 
-            self.board.robber_hex = random.randrange(len(self.board.tiles))
+            new_robber_pos = random.choice(list(self.board.hexes.keys()))
+            self.board.move_robber(new_robber_pos)
+            print("   → robber going on random pos")
             # Discard card if >=7
         else:
             produced = self.board.produce(dice)
             for pid, res in produced.items():
-                self.players[pid].add_resources(res)
-                if pid == self.current_player and sum(res.values()) > 0:
-                                    print(f"   → produced : {dict(res)}")
+                if sum(res.values()) > 0:
+                    self.players[pid].add_resources(res)
+                    print(f"   → J{pid} gets {dict(res)}")
+
+        for p in self.players:
+            res_str = " | ".join(f"{r.capitalize():5}: {v:2d}" for r,v in p.resources.items() if v > 0)
+            pts = p.victory_points
+            print(f"    J{p.pid}  {pts:2d} pts  →  {res_str}")
+
         # trade phase
 
         # construction phase
         action = self.agents[self.current_player].choose_action(self, self.current_player)
+        player = self.players[self.current_player]
+        acted = False
         
         if action == "city" and player.build_city():
             print(f"  → built a city !")

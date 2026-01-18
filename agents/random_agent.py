@@ -16,4 +16,6 @@ class RandomAgent(Agent):
         if not possible:
             return "pass"
 
-        return random.choice(possible)
+        choice =random.choice(possible)
+        print (f"J{player_id} chooses : {choice}")
+        return choice
