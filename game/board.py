@@ -4,6 +4,7 @@ import random
 from collections import Counter, defaultdict
 from game.map import HEX_POSITIONS, get_corners,PORTS
 from game.rules import RESOURCES
+import math
 
 HEX_RESOURCES_DISTRIB = (
     ["wood"]*4 + ["brick"]*3 + ["sheep"]*4 +
@@ -12,6 +13,28 @@ HEX_RESOURCES_DISTRIB = (
 
 
 HEX_NUMBERS_DISTRIB = [2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12]
+
+HEX_RADIUS = 60                # distance centre → vertex
+HEX_WIDTH = HEX_RADIUS * 2
+HEX_HEIGHT = HEX_RADIUS * math.sqrt(3)
+
+COLORS = {
+    'desert': (210, 180, 140),
+    'wood':   (34, 139, 34),
+    'brick':  (165, 42, 42),
+    'sheep':  (144, 238, 144),
+    'wheat':  (255, 215, 0),
+    'ore':    (105, 105, 105),
+    'water':  (100, 149, 237),
+    'road_border': (80, 80, 80),
+}
+
+PLAYER_COLORS = [
+    (220, 20, 60),     # J0 - rouge vif
+    (30, 144, 255),    # J1 - bleu
+    (255, 215, 0),     # J2 - jaune/or
+    (50, 205, 50),     # J3 - vert lime
+]
 
 class HexTile:
     def __init__(self, resource, number=None):
@@ -29,12 +52,19 @@ class Board:
         num_idx = 0
 
         self.hexes = {}
+        self.hex_centers = {}          
+        self.hex_polygons = {}      
+
         for pos in HEX_POSITIONS:
             res = tiles_resources.pop(0)
             number = None if res == "desert" else numbers[num_idx]
             if res != "desert":
                 num_idx += 1
             self.hexes[pos] = HexTile(res, number)
+
+            cx, cy = self.axial_to_pixel(*pos)
+            self.hex_centers[pos] = (cx, cy)
+            self.hex_polygons[pos] = self.get_hex_points(cx, cy)
 
         # Robber on désert
         self.robber_pos = next(pos for pos, tile in self.hexes.items() if tile.robber)
@@ -68,6 +98,11 @@ class Board:
             self.vertex_neighbors[v] = list(set(self.vertex_neighbors[v]))
 
         # print(f"number unique edges : {len(self.all_edges)}") 
+        self.buildings = {}
+        self.production_map = defaultdict(list)
+        for pos, tile in self.hexes.items():
+            if tile.number:
+                self.production_map[tile.number].append(pos)
 
         self.ports=[]
 
@@ -79,10 +114,16 @@ class Board:
             port_types=['generic']*4 +['wood','brick','sheep','wheat','ore']
             random.shuffle(port_types)
             port_type=port_types.pop()
+            px1, py1 = self.vertex_to_pixel(*v1)
+            px2, py2 = self.vertex_to_pixel(*v2)
+            port_center = ((px1 + px2) / 2, (py1 + py2) / 2)
+
             self.ports.append({
                 'edge': edge,
                 'type': port_type,
-                'vertices': (v1, v2)
+                'vertices': (v1, v2),
+                'center': port_center,
+                'angle': math.degrees(math.atan2(py2 - py1, px2 - px1)) 
             })
 
         # verification
@@ -92,6 +133,39 @@ class Board:
         # print(f"Unique vertex : {len(all_corners)}")  # around 54
         # print("Exemples :", sorted(list(all_corners))[:10], "... et", sorted(list(all_corners))[-10:])
 
+
+    def axial_to_pixel(self, q, r):
+        x = HEX_RADIUS * 3/2 * q
+        y = HEX_RADIUS * math.sqrt(3) * (r + q/2.0)
+        return x + 600, y + 450   # centrage approximatif – ajuste selon ton écran
+
+    def vertex_to_pixel(self, vq, vr):
+        q = vq / 2.0   # ← important : adapte selon ton facteur dans get_corners
+        r = vr / 2.0
+        return self.axial_to_pixel(q, r)
+
+    def get_hex_points(self, center_x, center_y):
+        points = []
+        for i in range(6):
+            angle_deg = 60 * i + 30   # flat-top
+            angle_rad = math.radians(angle_deg)
+            px = center_x + HEX_RADIUS * math.cos(angle_rad)
+            py = center_y + HEX_RADIUS * math.sin(angle_rad)
+            points.append((px, py))
+        return points
+    
+    def get_render_data(self):
+        return {
+            'hex_centers': self.hex_centers,
+            'hex_polygons': self.hex_polygons,
+            'hex_tiles': self.hexes,
+            'robber_pos': self.robber_pos,
+            'buildings': self.buildings,
+            'roads': self.roads,
+            'ports': self.ports,
+            'vertex_to_pixel': self.vertex_to_pixel,
+        }
+    
     def get_all_vertices(self):
         vertices = set()
         for pos in self.hexes:

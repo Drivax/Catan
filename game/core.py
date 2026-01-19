@@ -91,8 +91,19 @@ class CatanGame:
             print("   → robber going on random pos")
            
             candidates = self.board.get_steal_candidates(self.board.robber_pos, self.current_player)
-            if candidates:
-                victim_pid = random.choice(candidates)
+            valid_victims = []
+            for pid in candidates:
+                victim = self.players[pid]
+                if sum(victim.resources.values()) >= 1:
+                    valid_victims.append(pid)
+            scored_victims = [
+                (pid, sum(self.players[pid].resources.values()))
+                for pid in candidates
+            ]
+            if valid_victims:
+                victim_pid = random.choice(valid_victims)
+                victim_pid = max(scored_victims, key=lambda x: x[1])[0] 
+                
                 victim = self.players[victim_pid]
                 if victim.resources:
                     stolen_res = random.choice(list(victim.resources.elements()))  
