@@ -26,9 +26,7 @@ COLORS = {
     'wheat':  (255, 215, 0),
     'ore':    (105, 105, 105),
     'water':  (100, 149, 237),
-    'road_border': (80, 80, 80),
 }
-
 PLAYER_COLORS = [
     (220, 20, 60),     # J0 - rouge vif
     (30, 144, 255),    # J1 - bleu
@@ -137,12 +135,16 @@ class Board:
     def axial_to_pixel(self, q, r):
         x = HEX_RADIUS * 3/2 * q
         y = HEX_RADIUS * math.sqrt(3) * (r + q/2.0)
-        return x + 600, y + 450   # centrage approximatif – ajuste selon ton écran
+        return x + 600, y + 450   
 
     def vertex_to_pixel(self, vq, vr):
-        q = vq / 2.0   # ← important : adapte selon ton facteur dans get_corners
+
+        q = vq / 2.0  
         r = vr / 2.0
-        return self.axial_to_pixel(q, r)
+        x = HEX_RADIUS * (3/2 * q)
+        y = HEX_RADIUS * math.sqrt(3) * (r + q/2.0)
+        
+        return x + 600, y + 450
 
     def get_hex_points(self, center_x, center_y):
         points = []
