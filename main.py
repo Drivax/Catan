@@ -8,7 +8,7 @@ def main():
     # random.seed(52)
 
     game=CatanGame(agents=agents,num_players=4)
-    winner = game.run_until_end(max_turns=5)
+    winner = game.run_until_end(max_turns=2000)
 
 if __name__ == "__main__":
     main()
