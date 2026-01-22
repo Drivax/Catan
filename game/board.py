@@ -14,9 +14,10 @@ HEX_RESOURCES_DISTRIB = (
 
 HEX_NUMBERS_DISTRIB = [2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12]
 
-HEX_RADIUS = 60                # distance centre → vertex
+HEX_RADIUS = 70                
 HEX_WIDTH = HEX_RADIUS * 2
 HEX_HEIGHT = HEX_RADIUS * math.sqrt(3)
+HEX_INNER_RADIUS = HEX_RADIUS * math.sqrt(3) / 2   
 
 COLORS = {
     'desert': (210, 180, 140),
@@ -102,27 +103,40 @@ class Board:
             if tile.number:
                 self.production_map[tile.number].append(pos)
 
-        self.ports=[]
+        self.ports = []
 
-        for v1,v2 in PORTS:
-            edge=frozenset({v1,v2})
-            if edge not in self.all_edges:
-                print(f"error with the port {v1}-{v2}")
-                continue
-            port_types=['generic']*4 +['wood','brick','sheep','wheat','ore']
-            random.shuffle(port_types)
-            port_type=port_types.pop()
+        edge_hex_count = defaultdict(int)
+        for hex_pos in self.hexes:
+            corners = get_corners(*hex_pos)
+            for i in range(6):
+                v1 = corners[i]
+                v2 = corners[(i + 1) % 6]
+                edge = frozenset({v1, v2})
+                edge_hex_count[edge] += 1
+
+        border_edges = [edge for edge, count in edge_hex_count.items() if count == 1]
+
+        random.shuffle(border_edges)
+        border_edges = border_edges[:9]  
+
+        port_types = ['generic'] * 4 + ['wood', 'brick', 'sheep', 'wheat', 'ore']
+        random.shuffle(port_types)
+
+        for i, edge in enumerate(border_edges):
+            v1, v2 = list(edge)
+            ptype = port_types[i]
+
             px1, py1 = self.vertex_to_pixel(*v1)
             px2, py2 = self.vertex_to_pixel(*v2)
-            port_center = ((px1 + px2) / 2, (py1 + py2) / 2)
+            center = ((px1 + px2) / 2, (py1 + py2) / 2)
 
             self.ports.append({
                 'edge': edge,
-                'type': port_type,
+                'type': ptype,
                 'vertices': (v1, v2),
-                'center': port_center,
-                'angle': math.degrees(math.atan2(py2 - py1, px2 - px1)) 
+                'center': center
             })
+
 
         # verification
         # all_corners = set()
@@ -133,9 +147,13 @@ class Board:
 
 
     def axial_to_pixel(self, q, r):
-        x = HEX_RADIUS * 3/2 * q
-        y = HEX_RADIUS * math.sqrt(3) * (r + q/2.0)
-        return x + 600, y + 450   
+        x = HEX_RADIUS * (3/2 * q)
+        y = HEX_RADIUS * (math.sqrt(3)/2 * q + math.sqrt(3) * r)
+        
+        # Centrage du plateau (ajuste ces valeurs !)
+        offset_x = 600
+        offset_y = 500          # ← souvent plus haut que large
+        return x + offset_x, y + offset_y
 
     def vertex_to_pixel(self, vq, vr):
 
@@ -145,7 +163,15 @@ class Board:
         y = HEX_RADIUS * math.sqrt(3) * (r + q/2.0)
         
         return x + 600, y + 450
-
+    def get_hex_polygon_points(self, center_x, center_y):
+        points = []
+        for i in range(6):
+            angle_deg = 60 * i + 30   # 30° pour flat-top
+            angle_rad = math.radians(angle_deg)
+            px = center_x + HEX_RADIUS * math.cos(angle_rad)
+            py = center_y + HEX_RADIUS * math.sin(angle_rad)
+            points.append((px, py))
+        return points
     def get_hex_points(self, center_x, center_y):
         points = []
         for i in range(6):
@@ -279,7 +305,20 @@ class Board:
                     produced[pid][tile.resource] += amt
                     print(f"  +{amt} {tile.resource} → J{pid} (vertex {vkey}, hex {hex_pos})")
         return produced
-    
+    def produce_from_vertex(self, vkey):
+        produced = Counter()
+        adjacent_hexes = []
+        for hex_pos, tile in self.hexes.items():
+            corners = get_corners(*hex_pos)
+            if vkey in corners:
+                adjacent_hexes.append((hex_pos, tile))
+        
+        for hex_pos, tile in adjacent_hexes:
+            if tile.number is None: 
+                continue
+            produced[tile.resource] += 1
+        
+        return produced
     def get_adjacent_players(self, hex_pos):
         adjacent = []
         corners = get_corners(*hex_pos)

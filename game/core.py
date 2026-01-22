@@ -44,8 +44,13 @@ class CatanGame:
                     if self.board.place_settlement(pid, v):
                         player.build_settlement(free_cost=True)
                         placed_vertices.add(v)
-                        print(f"J{pid} settlement {count+1}/2 sur {v}")
+                        print(f"J{pid} settlement {count+1}/2 on {v}")
+                        if count == 0:  
+                            produced = self.board.produce_from_vertex(v)
+                            if produced:
+                                player.add_resources(produced)
                         count += 1
+
                     else:
                         all_vertices.append(v)
 
@@ -128,6 +133,8 @@ class CatanGame:
             print(f"    J{p.pid}  {pts:2d} pts  →  {res_str}")
 
         # trade phase
+        self.handle_player_trade(self.current_player)
+
         agent=self.agents[self.current_player]
         player = self.players[self.current_player]
         port_types=self.board.get_player_ports(player.pid)
@@ -203,3 +210,60 @@ class CatanGame:
         if self.winner is None:
               print("Turns limit reached, forced draw")
         return self.winner
+    
+    def handle_player_trade(self, pid):
+        player = self.players[pid]
+        agent = self.agents[pid]
+
+        print(f"   [Échange joueurs] J{pid} peut proposer un trade")
+
+        # L'agent décide s'il veut proposer (random pour RandomAgent)
+        if random.random() < 0.4:  # 40% de chance de proposer un trade
+            print("   → J{pid} décide de ne pas proposer de trade")
+            return
+
+        # Choix de l'adversaire (random parmi les autres)
+        other_pids = [i for i in range(self.num_players) if i != pid]
+        if not other_pids:
+            return
+        target_pid = random.choice(other_pids)
+        target = self.players[target_pid]
+
+        # Ressources que le joueur a en quantité suffisante
+        my_abundant = [r for r in RESOURCES if player.resources[r] >= 1]
+
+        if not my_abundant:
+            print("   → J{pid} n'a rien à donner")
+            return
+
+        give_res = random.choice(my_abundant)
+        give_amount = 1 if random.random() < 0.7 else 2  # 1:1 ou 2:1
+
+        # Ce qu'il veut recevoir (quelque chose qu'il a peu)
+        candidates_receive = [r for r in RESOURCES if player.resources[r] <= 1 and r != give_res]
+        if not candidates_receive:
+            candidates_receive = [r for r in RESOURCES if r != give_res]
+        receive_res = random.choice(candidates_receive)
+        receive_amount = 1  # pour l'instant on demande toujours 1
+
+        print(f"   → J{pid} propose à J{target_pid} : {give_amount}×{give_res} contre 1×{receive_res}")
+
+        # L'adversaire décide s'il accepte (logique très basique)
+        accept = False
+
+        # Accepte si :
+        # - il a assez de la ressource demandée
+        # - et qu'il a peu de la ressource qu'il reçoit (ou aléatoire)
+        if target.resources[receive_res] >= receive_amount:
+            if target.resources[give_res] <= 2 or random.random() < 0.6:
+                accept = True
+
+        if accept:
+            print(f"   → J{target_pid} **accepte**")
+            # Exécution de l'échange
+            player.execute_trade(give_res, give_amount, receive_res, receive_amount)
+            target.execute_trade(receive_res, receive_amount, give_res, give_amount)
+            print(f"   → Échange effectué : J{pid} donne {give_amount} {give_res} → reçoit 1 {receive_res}")
+            print(f"   → J{target_pid} donne 1 {receive_res} → reçoit {give_amount} {give_res}")
+        else:
+            print(f"   → J{target_pid} **refuse**")

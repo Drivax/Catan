@@ -95,3 +95,13 @@ class Player:
         self.resources[give_res] -= ratio
         self.resources[receive_res] += 1
         return True
+    
+    def can_offer_trade(self, give_res, give_amount, receive_res, receive_amount):
+        return self.resources[give_res] >= give_amount
+
+    def execute_trade(self, give_res, give_amount, receive_res, receive_amount):
+        if self.resources[give_res] < give_amount:
+            return False
+        self.resources[give_res] -= give_amount
+        self.resources[receive_res] += receive_amount
+        return True

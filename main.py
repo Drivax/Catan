@@ -9,9 +9,9 @@ def main():
 
     game=CatanGame(agents=agents,num_players=4)
     
-    vizualize.draw_board(game)
+    # vizualize.draw_board(game)
 
-    winner = game.run_until_end(max_turns=50)
+    winner = game.run_until_end(max_turns=2)
 
 if __name__ == "__main__":
     main()
