@@ -69,3 +69,20 @@ class RandomAgent(Agent):
             }
         
         return None
+    def choose_trade(self, game, pid):
+            player = game.players[pid]
+            ports = game.board.get_player_ports(pid)
+            
+            if sum(player.resources.values()) < 4:
+                return None
+            
+            abundant = max(player.resources, key=player.resources.get)
+            if player.resources[abundant] < 4:
+                return None
+            
+            want = random.choice([r for r in RESOURCES if r != abundant])
+            ratio = player.can_trade_to_bank(abundant, want, ports)
+            
+            if ratio:
+                return {'give': abundant, 'receive': want, 'ratio': ratio}
+            return None
