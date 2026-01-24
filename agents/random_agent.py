@@ -37,38 +37,7 @@ class RandomAgent(Agent):
         return Action('pass')
     
 
-    def choose_trade(self, game, pid):
-        player = game.players[pid]
-        ports = game.board.get_player_ports(pid)
-        
-        total_res = sum(player.resources.values())
-        if total_res < 4:
-            return None
-        
-        abundant = max(player.resources, key=player.resources.get)
-        if player.resources[abundant] < 4:
-            return None
-        
-        candidates = []
-        for r in RESOURCES:
-            if r != abundant and player.resources[r] <= 2: 
-                candidates.append(r)
-        
-        if not candidates:
-            candidates = [r for r in RESOURCES if r != abundant]
-        
-        want = random.choice(candidates)
-        
-        ratio = player.can_trade_to_bank(abundant, want, ports)
-        if ratio:
-            return {
-                'action': 'trade_bank',
-                'give': abundant,
-                'receive': want,
-                'ratio': ratio
-            }
-        
-        return None
+
     def choose_trade(self, game, pid):
             player = game.players[pid]
             ports = game.board.get_player_ports(pid)
@@ -86,3 +55,27 @@ class RandomAgent(Agent):
             if ratio:
                 return {'give': abundant, 'receive': want, 'ratio': ratio}
             return None
+    
+    def choose_player_trade(self, game, pid):
+        player = game.players[pid]
+        others = [p for i, p in enumerate(game.players) if i != pid]
+
+        if sum(player.resources.values()) < 2:
+            return None
+
+        give_res = max(player.resources, key=player.resources.get)
+        if player.resources[give_res] < 1:
+            return None
+
+        target = random.choice(others)
+        want_res = random.choice([r for r in RESOURCES if player.resources[r] <= 1])
+
+        give_amount = 1 if player.resources[give_res] <= 3 else 2
+
+        return {
+            'target_pid': target.pid,
+            'give_res': give_res,
+            'give_amount': give_amount,
+            'receive_res': want_res,
+            'receive_amount': 1
+        }
