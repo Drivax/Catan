@@ -11,7 +11,7 @@ def main():
     
     # vizualize.draw_board(game)
 
-    winner = game.run_until_end(max_turns=2)
+    winner = game.run_until_end(max_turns=50)
 
 if __name__ == "__main__":
     main()
