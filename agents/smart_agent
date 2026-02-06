@@ -1,0 +1,202 @@
+# agents/smart_agent.py
+import random
+from agents.base import Agent, Action
+from game.rules import RESOURCES
+
+
+class SmartAgent(Agent):
+    """
+    Agent plus intelligent que RandomAgent :
+    - Priorise les villes (points immédiats)
+    - Place les villages sur des hexes à fort potentiel (numéros 5-6-8-9)
+    - Construit des routes pour connecter / bloquer
+    - Trade banque si excès et manque critique
+    - Propose des trades joueurs seulement si très avantageux
+    - Voleur : cible prioritairement les joueurs riches / avec beaucoup de bâtiments
+    """
+
+    def choose_action(self, game, player_id):
+        player = game.players[player_id]
+        board = game.board
+
+        # 1. Voleur : priorité absolue si c'est le tour
+        if hasattr(game, 'robber_turn') and game.robber_turn:
+            best_hex = None
+            best_score = -1
+
+            for hex_pos in board.get_all_hexes():
+                adj = board.get_adjacent_players(hex_pos)
+                opponents = [p for p, _ in adj if p != player_id]
+                if not opponents:
+                    continue
+
+                # Score : nombre d'opposants + richesse approximative (nombre de bâtiments adjacents)
+                score = len(opponents) * 10
+                for opp_pid, _ in adj:
+                    opp = game.players[opp_pid]
+                    score += sum(opp.resources.values()) // 2   # richesse approx
+                    score += len([v for v, (p, _) in board.buildings.items() if p == opp_pid]) // 3
+
+                if score > best_score:
+                    best_score = score
+                    best_hex = hex_pos
+
+            if best_hex:
+                return Action('move_robber', best_hex)
+            # Fallback random parmi hexes avec au moins un bâtiment adverse
+            hexes_with_opp = [h for h in board.get_all_hexes() if any(p != player_id for p,_ in board.get_adjacent_players(h))]
+            if hexes_with_opp:
+                return Action('move_robber', random.choice(hexes_with_opp))
+            return Action('move_robber', random.choice(board.get_all_hexes()))
+
+        # 2. Priorité 1 : construire une ville si possible (gain +1 point immédiat)
+        own_settlements = [
+            v for v, (p, t) in board.buildings.items()
+            if p == player_id and t == 'settlement'
+        ]
+        if player.can_build_city() and own_settlements:
+            # Choisit la ville sur le settlement le plus "rentable" (adj à hexes à fort numéro)
+            best_v = max(
+                own_settlements,
+                key=lambda v: self._vertex_value(board, v),
+                default=random.choice(own_settlements)
+            )
+            return Action('build_city', best_v)
+
+        # 3. Priorité 2 : placer un nouveau village sur un spot à fort potentiel
+        free_vertices = [v for v in board.get_all_vertices() if v not in board.buildings]
+        if player.can_build_settlement() and free_vertices:
+            # Score chaque vertex libre : nombre d'hex adj + valeur des numéros
+            best_v = max(
+                free_vertices,
+                key=lambda v: self._vertex_value(board, v),
+                default=random.choice(free_vertices)
+            )
+            return Action('build_settlement', best_v)
+
+        # 4. Construire une route (pour connecter ou bloquer)
+        possible_roads = board.get_possible_roads(player_id)
+        if player.can_build_road() and possible_roads:
+            # Priorise les routes qui ouvrent vers un bon vertex libre
+            best_edge = max(
+                possible_roads,
+                key=lambda e: self._road_value(board, e, player_id),
+                default=random.choice(possible_roads)
+            )
+            return Action('build_road', best_edge)
+
+        return Action('pass')
+
+    def _vertex_value(self, board, vertex):
+        """Valeur heuristique d'un vertex : potentiel de production"""
+        score = 0
+        adjacent_hexes = set()
+        for hex_pos, tile in board.hexes.items():
+            if vertex in get_corners(*hex_pos):
+                if tile.number:
+                    # Numéros chauds : 5,6,8,9 = +2 ; 4,10 = +1 ; 3,11 = +0.5 ; 2,12 = +0
+                    val = {5:2, 6:2, 8:2, 9:2, 4:1, 10:1, 3:0.5, 11:0.5, 2:0, 12:0}.get(tile.number, 0)
+                    score += val
+                    adjacent_hexes.add(hex_pos)
+        # Bonus si plusieurs hex adjacents
+        score += len(adjacent_hexes) * 0.5
+        return score
+
+    def _road_value(self, board, edge, player_id):
+        """Valeur heuristique d'une route"""
+        v1, v2 = list(edge)
+        score = 0
+        for v in (v1, v2):
+            # Ouvre vers un bon vertex libre ?
+            for nv in board.vertex_neighbors[v]:
+                if nv not in board.buildings:
+                    score += self._vertex_value(board, nv) * 0.8
+            # Connecte à nos propres bâtiments
+            if v in board.buildings and board.buildings[v][0] == player_id:
+                score += 2
+        return score
+
+    def choose_trade(self, game, pid):
+        """Trade banque : seulement si excès important et manque critique"""
+        player = game.players[pid]
+        ports = game.board.get_player_ports(pid)
+
+        total = sum(player.resources.values())
+        if total < 5:  # plus conservateur que random
+            return None
+
+        abundant = max(player.resources, key=player.resources.get)
+        if player.resources[abundant] < 5:  # on trade seulement si vraiment excès
+            return None
+
+        # Ce qu'on veut vraiment (priorité haute : manque de briques/bois pour route/village)
+        priority_want = ['brick', 'wood', 'wheat']  # pour construire
+        candidates = [r for r in priority_want if r != abundant and player.resources[r] <= 1]
+        if not candidates:
+            candidates = [r for r in RESOURCES if r != abundant and player.resources[r] <= 2]
+
+        if not candidates:
+            return None
+
+        want = random.choice(candidates)
+        ratio = player.can_trade_to_bank(abundant, want, ports)
+
+        if ratio and ratio <= 3:  # on refuse souvent le 4:1 sauf si très besoin
+            if player.resources[want] == 0 and player.resources[abundant] >= ratio + 2:
+                return Action(
+                    action='trade_bank',
+                    target={
+                        'give': abundant,
+                        'give_amount': ratio,
+                        'receive': want,
+                        'receive_amount': 1
+                    }
+                )
+        return None
+
+    def choose_player_trade(self, game, pid):
+        """Propose un trade joueur seulement si très avantageux"""
+        player = game.players[pid]
+
+        if sum(player.resources.values()) < 3:
+            return None
+
+        # On propose seulement si on a un excès très marqué
+        abundant = max(player.resources, key=player.resources.get)
+        if player.resources[abundant] < 4:
+            return None
+
+        # On cherche un joueur qui a ce qu'on veut et peu de ce qu'on donne
+        best_target = None
+        best_score = 0
+
+        for other in [p for i, p in enumerate(game.players) if i != pid]:
+            score = 0
+            for r in RESOURCES:
+                if player.resources[r] <= 1 and other.resources[r] >= 2:
+                    score += 3  # très bon pour nous
+                if other.resources[r] <= 1 and player.resources[r] >= 3:
+                    score += 2  # bon pour lui, mais on peut sur-offrir
+
+            if score > best_score:
+                best_score = score
+                best_target = other
+
+        if best_score < 4:  # seuil : on propose seulement si échange vraiment bon
+            return None
+
+        give_res = abundant
+        receive_res = random.choice([r for r in RESOURCES if player.resources[r] <= 1])
+
+        give_amount = 2 if player.resources[give_res] >= 5 else 1
+
+        return Action(
+            action='trade_player',
+            target={
+                'target_pid': best_target.pid,
+                'give_res': give_res,
+                'give_amount': give_amount,
+                'receive_res': receive_res,
+                'receive_amount': 1
+            }
+        )
