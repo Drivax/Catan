@@ -1,10 +1,11 @@
+from agents.smart_agent import SmartAgent
 from game.core import CatanGame
 from agents.random_agent import RandomAgent
 import random
 import vizualize
 
 def main():
-    agents = [RandomAgent() for _ in range(4)]
+    agents = [SmartAgent() for _ in range(4)]
     # random.seed(52)
 
     game=CatanGame(agents=agents,num_players=4)

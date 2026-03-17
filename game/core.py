@@ -2,7 +2,7 @@
 
 import random
 
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 from game.board import Board
 
@@ -12,7 +12,7 @@ from agents.base import Agent
 
 from agents.random_agent import RandomAgent
 
-from game.rules import RESOURCES
+from game.rules import RESOURCES, VICTORY_POINTS_TO_WIN
 
  
 
@@ -133,6 +133,14 @@ class CatanGame:
                     print(f"J{pid} road on {list(edge)}")
 
                     possible_roads = self.board.get_possible_roads(pid)
+
+ 
+
+            # Bootstrap resources: give each player 2 of each resource to help get started
+
+            bootstrap = Counter(wood=4, brick=3, sheep=3, wheat=3, ore=2)
+
+            player.add_resources(bootstrap)
 
  
 
@@ -380,7 +388,7 @@ class CatanGame:
 
         # Verification victoire
 
-        if player.victory_points >= 10:
+        if player.victory_points >= VICTORY_POINTS_TO_WIN:
 
             self.winner = player.pid
 
@@ -500,67 +508,79 @@ class CatanGame:
 
  
 
-        # FIX: f-string manquant dans les prints
+        # Agent chooses trade (or defaults to random) 
 
-        if random.random() < 0.4:
+        trade_offer = self.agents[pid].choose_player_trade(self, pid)
 
-            print(f"  -> J{pid} decide de ne pas proposer de trade")
+        if trade_offer is None:
 
             return
 
  
 
-        other_pids = [i for i in range(self.num_players) if i != pid]
+        # Trade negotiation
 
-        if not other_pids:
+        target_pid = trade_offer.target.get('target_pid')
 
-            return
+        give_res = trade_offer.target.get('give_res')
 
-        target_pid = random.choice(other_pids)
+        give_amount = trade_offer.target.get('give_amount')
+
+        receive_res = trade_offer.target.get('receive_res')
+
+        receive_amount = trade_offer.target.get('receive_amount')
+
+ 
+
+        print(f"  -> J{pid} propose a J{target_pid} : {give_amount}x{give_res} contre {receive_amount}x{receive_res}")
+
+ 
 
         target = self.players[target_pid]
 
- 
-
-        my_abundant = [r for r in RESOURCES if player.resources[r] >= 1]
-
-        if not my_abundant:
-
-            print(f"  -> J{pid} n'a rien a donner")
-
-            return
-
- 
-
-        give_res = random.choice(my_abundant)
-
-        give_amount = 1 if random.random() < 0.7 else 2
-
- 
-
-        candidates_receive = [r for r in RESOURCES if player.resources[r] <= 1 and r != give_res]
-
-        if not candidates_receive:
-
-            candidates_receive = [r for r in RESOURCES if r != give_res]
-
-        receive_res = random.choice(candidates_receive)
-
-        receive_amount = 1
-
- 
-
-        print(f"  -> J{pid} propose a J{target_pid} : {give_amount}x{give_res} contre 1x{receive_res}")
-
- 
-
         accept = False
 
-        if target.resources[receive_res] >= receive_amount:
+ 
 
-            if target.resources[give_res] <= 2 or random.random() < 0.6:
+        # Target's acceptance logic: check if beneficial
+
+        if target.resources[receive_res] < receive_amount:
+
+            accept = False
+
+        else:
+
+            # Simple heuristic: what do we need vs what we're giving
+
+            target_needs_give = (target.resources[give_res] <= 1)  # target is low on what we're giving
+
+            target_needs_receive = (target.resources[receive_res] <= 1)  # target is low on what they're receiving
+
+            
+
+            if target_needs_give and not target_needs_receive:
+
+                # Target has what they need, doesn't need what we're giving - reject
+
+                accept = False
+
+            elif not target_needs_give and target_needs_receive:
+
+                # Target needs what we're giving and doesn't have what we want - accept
 
                 accept = True
+
+            elif target_needs_give and target_needs_receive:
+
+                # Both benefit - accept with higher probability
+
+                accept = random.random() < 0.8
+
+            else:
+
+                # Both have plenty - reject
+
+                accept = random.random() < 0.3
 
  
 
@@ -572,9 +592,9 @@ class CatanGame:
 
             target.execute_trade(receive_res, receive_amount, give_res, give_amount)
 
-            print(f"  -> J{pid} donne {give_amount} {give_res} -> recoit 1 {receive_res}")
+            print(f"  -> J{pid} donne {give_amount} {give_res} -> recoit {receive_amount} {receive_res}")
 
-            print(f"  -> J{target_pid} donne 1 {receive_res} -> recoit {give_amount} {give_res}")
+            print(f"  -> J{target_pid} donne {receive_amount} {receive_res} -> recoit {give_amount} {give_res}")
 
         else:
 
