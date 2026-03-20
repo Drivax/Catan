@@ -1,0 +1,36 @@
+SmartAgent Fine-Tuning Results
+Generated: 2026-03-20 16:24:11
+============================================================
+
+Best Win Rate: 77.3%
+Total Evaluations: 60
+Games per Evaluation: 150
+Total Games Played: 9000
+
+Best Parameters:
+------------------------------------------------------------
+prob_trade           = 0.7377051792880078
+road_maker           = False
+greed                = False
+prob_weight          = 0.5
+diversity_weight     = 0.639284045549558
+trade_chaos          = 0.023544309154930484
+sheep_hoarder        = False
+dumb_thief           = True
+city_first           = 1.1260009362822951
+port_lover           = False
+
+
+Usage in code:
+best_agent = SmartAgent(
+    prob_trade=np.float64(0.7377051792880078),
+    road_maker=False,
+    greed=False,
+    prob_weight=np.float64(0.5),
+    diversity_weight=np.float64(0.639284045549558),
+    trade_chaos=np.float64(0.023544309154930484),
+    sheep_hoarder=False,
+    dumb_thief=True,
+    city_first=np.float64(1.1260009362822951),
+    port_lover=False,
+)

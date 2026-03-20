@@ -37,14 +37,17 @@ def main():
         RandomAgent(dumb_thief=True) - Always targets the leader
     """
     
-    # Example 1: Default SmartAgent vs RandomAgent
+    # Run fine-tuned SmartAgent comparison
+    # To generate fine-tuned parameters, use: from fine_tuning import fine_tune
+    # best_params, winrate = fine_tune(num_evaluations=60, games_per_eval=150)
+    
     agents_config = [
-        SmartAgent(greed=1, prob_weight=2.0, diversity_weight=1.0),             
-        SmartAgent(), 
+        SmartAgent(),  # Use defaults for fair baseline comparison
+        SmartAgent(),
         SmartAgent(), 
         SmartAgent() 
     ]
-    compare_agents(agents_config, num_games=50, max_turns=500)
+    compare_agents(agents_config, num_games=500, max_turns=500)
     
     
     # Alternative: Regular game with visualization

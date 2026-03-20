@@ -15,7 +15,7 @@ from game.core import CatanGame
 class ParameterOptimizer:
     """Reinforcement learning agent for optimizing SmartAgent parameters"""
     
-    def __init__(self, num_evaluations=50, games_per_eval=50):
+    def __init__(self, num_evaluations=50, games_per_eval=150):
         """
         Initialize the optimizer
         
@@ -84,29 +84,59 @@ class ParameterOptimizer:
         Evaluate a parameter combination by playing games
         
         Args:
-            params: Dictionary of parameters for SmartAgent
+            params: Dictionary of parameters for SmartAgent being optimized
             evaluation_num: Current evaluation number (for reporting)
             
         Returns:
-            win_rate: Win rate (0-1) for the SmartAgent player
+            win_rate: Win rate (0-1) for the SmartAgent player against diverse opponents
         """
         test_agent = SmartAgent(**params)
         
-        # Play against random agents
-        agents_config = [
-            test_agent,
-            SmartAgent(),
-            SmartAgent(),
-            SmartAgent()
-        ]
-        
         wins = 0
         for game_num in range(self.games_per_eval):
+            # Create realistic mixed opponent strategies
+            # 50% RandomAgents, 25% Default SmartAgents, 25% Randomized SmartAgents
+            rand_val = np.random.random()
+            
+            if rand_val < 0.5:
+                # 50% match: vs 3 RandomAgents
+                opponent_configs = [RandomAgent() for _ in range(3)]
+            elif rand_val < 0.75:
+                # 25% match: vs 3 Default SmartAgents
+                opponent_configs = [SmartAgent() for _ in range(3)]
+            else:
+                # 25% match: vs 3 Randomized SmartAgents (for robustness)
+                opponent_configs = [
+                    SmartAgent(
+                        prob_trade=np.random.uniform(0.3, 1.0),
+                        road_maker=bool(np.random.randint(0, 2)),
+                        greed=bool(np.random.randint(0, 2)),
+                        prob_weight=np.random.uniform(0.5, 3.0),
+                        diversity_weight=np.random.uniform(0.5, 3.0),
+                        trade_chaos=np.random.uniform(0.0, 0.5),
+                        sheep_hoarder=bool(np.random.randint(0, 2)),
+                        dumb_thief=bool(np.random.randint(0, 2)),
+                        city_first=np.random.uniform(0.0, 10.0),
+                        port_lover=bool(np.random.randint(0, 2))
+                    )
+                    for _ in range(3)
+                ]
+            
+            # Randomize player order - add test agent and shuffle
+            agents_config = [test_agent] + opponent_configs
+            player_indices = list(range(4))
+            np.random.shuffle(player_indices)
+            agents_config = [agents_config[i] for i in player_indices]
+            
+            # Find which position the test agent is at
+            test_agent_position = agents_config.index(test_agent)
+            
             agents = [copy.copy(agent) for agent in agents_config]
             game = CatanGame(agents=agents, num_players=4, verbose=False)
             winner = game.run_until_end(max_turns=500)
             
-            if winner == 0:  # Our SmartAgent is at position 0
+            # Count win for test agent regardless of starting position
+            if winner == test_agent_position:
                 wins += 1
             
             if (game_num + 1) % max(1, self.games_per_eval // 5) == 0:
@@ -348,28 +378,32 @@ class ParameterOptimizer:
         return output_dir
 
 
-def fine_tune(num_evaluations=50, games_per_eval=100):
+def fine_tune(num_evaluations=60, games_per_eval=150):
     """
     Main fine-tuning function: reinforcement learning optimization of SmartAgent parameters
     
     This function uses simulated annealing to find SmartAgent parameters that maximize 
-    win rate against random agents over multiple games.
+    win rate against REALISTIC mixed opponents:
+    - 50% games vs RandomAgents  
+    - 25% games vs Default SmartAgents
+    - 25% games vs Randomized SmartAgents (robustness)
     
     Algorithm:
     - Starts with GOOD defaults (not random)
     - Uses simulated annealing for exploration/exploitation balance
     - Adaptive mutation rate: increases when stuck, decreases when making progress
     - Temperature cools down over time (less likely to accept worse solutions)
+    - Randomized player order each game (fair evaluation)
     
     Args:
-        num_evaluations: Number of parameter combinations to evaluate (default 50)
-        games_per_eval: Number of games to play per parameter combination (default 100)
+        num_evaluations: Number of parameter combinations to evaluate (default 60)
+        games_per_eval: Number of games to play per parameter combination (default 150)
         
     Returns:
         Tuple of (best_params dict, best_winrate float)
         
     Example:
-        best_params, winrate = fine_tune(num_evaluations=50, games_per_eval=100)
+        best_params, winrate = fine_tune(num_evaluations=60, games_per_eval=150)
         best_agent = SmartAgent(**best_params)
     """
     print("\n" + "=" * 80)

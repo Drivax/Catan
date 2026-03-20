@@ -1,5 +1,6 @@
 """Agent performance comparison and visualization module"""
 
+import random
 import matplotlib.pyplot as plt
 import copy
 from game.core import CatanGame
@@ -49,24 +50,34 @@ def compare_agents(agent_template, num_games=100, max_turns=500):
         legend = f"Player {i}: " + ", ".join(params)
         agent_legends.append(legend)
     
-    # Count wins per agent (by position)
+    # Count wins per agent (track by agent identity, not position)
     agent_wins = {i: 0 for i in range(4)}
     
     print(f"Configuration:")
     for i, label in enumerate(agent_labels):
-        print(f"  Player {i}: {label}")
-    print(f"Simulating {num_games} games...")
+        print(f"  Agent {i}: {label}")
+    print(f"Simulating {num_games} games with randomized player order...")
     print("=" * 60)
     
     for game_num in range(num_games):
         # Create copies of template agents with same parameters
         agents = [copy.copy(template_agent) for template_agent in agent_template]
         
+        # Randomize player order for each game
+        player_indices = list(range(4))
+        random.shuffle(player_indices)
+        agents = [agents[i] for i in player_indices]
+        
+        # Create mapping: position -> original agent index
+        position_to_agent = {pos: player_indices[pos] for pos in range(4)}
+        
         game = CatanGame(agents=agents, num_players=4, verbose=False)
         winner = game.run_until_end(max_turns=max_turns)
         
         if winner is not None:
-            agent_wins[winner] += 1
+            # Map winning position back to original agent index
+            agent_id = position_to_agent[winner]
+            agent_wins[agent_id] += 1
         
         if (game_num + 1) % max(1, num_games // 10) == 0:
             print(f"Progress: {game_num + 1}/{num_games} games")
