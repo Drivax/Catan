@@ -15,18 +15,65 @@ class SmartAgent(Agent):
     - Trades banque/joueurs : configurables
     """
 
-    def __init__(self, prob_trade=0.7, road_maker=0, greed=0):
+    def __init__(self, prob_trade=0.7, road_maker=0, greed=0, prob_weight=1.0, diversity_weight=1.0, trade_chaos=0.0, sheep_hoarder=False, dumb_thief=False):
         """
         Args:
             prob_trade (float): Probabilité de vouloir faire un trade à chaque tour [0-1]
             road_maker (int): 0=normal, 1=maximiser construction de routes
             greed (int): 0=normal, 1=seulement trades avantageux (1 ressource contre 2+)
+            prob_weight (float): Weight for tile probability in starting placement
+            diversity_weight (float): Weight for resource diversity in starting placement
+            trade_chaos (float): Probability of offering/accepting bad trades [0.0-1.0]
+            sheep_hoarder (bool or float): If True/1.0, refuses to give sheep away
+            dumb_thief (bool): If True, always steals from leader instead of weakest
         """
         super().__init__()
         self.last_upgraded_vertex = None
         self.prob_trade = max(0.0, min(1.0, prob_trade))  # Clamp [0, 1]
         self.road_maker = 1 if road_maker else 0
         self.greed = 1 if greed else 0
+        self.prob_weight = prob_weight
+        self.diversity_weight = diversity_weight
+        self.trade_chaos = max(0.0, min(1.0, trade_chaos))  # Clamp [0, 1]
+        self.sheep_hoarder = 1 if sheep_hoarder else 0
+        self.dumb_thief = 1 if dumb_thief else 0
+
+    def choose_starting_settlement(self, game, pid, valid_vertices):
+        """
+        Choose starting settlement based on weighted tile probability and resource diversity.
+        If road_maker=1, prioritize vertices with brick tiles.
+        """
+        board = game.board
+        from game.map import get_corners
+        best_v = None
+        best_score = -float('inf')
+        for v in valid_vertices:
+            prob_score = 0.0
+            resources_present = set()
+            brick_bonus = 0.0
+            for hex_pos, tile in board.hexes.items():
+                if v in get_corners(*hex_pos):
+                    if tile.number:
+                        # Probability score: numbers close to 7 are best
+                        if tile.number in [6, 8]:
+                            prob_score += 3.0
+                        elif tile.number in [5, 9]:
+                            prob_score += 2.0
+                        elif tile.number in [4, 10]:
+                            prob_score += 1.0
+                        else:
+                            prob_score += 0.1
+                    if tile.resource != 'desert':
+                        resources_present.add(tile.resource)
+                    # road_maker bonus: prioritize brick tiles
+                    if self.road_maker and tile.resource == 'brick':
+                        brick_bonus += 5.0
+            diversity = len(resources_present)
+            score = self.prob_weight * prob_score + self.diversity_weight * diversity + brick_bonus
+            if score > best_score:
+                best_score = score
+                best_v = v
+        return best_v
 
     def choose_action(self, game, pid):
         player = game.players[pid]
@@ -90,13 +137,26 @@ class SmartAgent(Agent):
         return Action('pass')
 
     def _choose_robber_move(self, game, pid):
-        """AGGRESSIVE robber blocking - prioritize leader"""
+        """AGGRESSIVE robber blocking - prioritize leader or dumb mode"""
         board = game.board
         player = game.players[pid]
         
         # Find the leader
         leader_pid = max(range(game.num_players), key=lambda i: game.players[i].victory_points)
         
+        # Dumb thief: always target leader
+        if self.dumb_thief:
+            best_hex = None
+            for hex_pos in board.get_all_hexes():
+                adj = board.get_adjacent_players(hex_pos)
+                if any(p == leader_pid for p, _ in adj):
+                    best_hex = hex_pos
+                    break
+            if not best_hex:
+                best_hex = random.choice(board.get_all_hexes())
+            return Action('move_robber', best_hex)
+        
+        # Smart mode: score all hexes
         best_hex = None
         best_score = -1
 
@@ -213,7 +273,7 @@ class SmartAgent(Agent):
 
     def choose_trade(self, game, pid):
         """Bank trading - smart conversions for building resources
-        Respects prob_trade and greed parameters
+        Respects prob_trade, greed, sheep_hoarder, and trade_chaos parameters
         """
         # Check if agent wants to trade this turn (based on prob_trade)
         if random.random() > self.prob_trade:
@@ -258,6 +318,15 @@ class SmartAgent(Agent):
         want = needs[0]
         give = max(abundant, key=lambda r: player.resources.get(r, 0))
         
+        # Sheep hoarder refuses to give sheep
+        if self.sheep_hoarder and give == 'sheep':
+            # Try another abundant resource
+            alternatives = [r for r in abundant if r != 'sheep']
+            if alternatives:
+                give = max(alternatives, key=lambda r: player.resources.get(r, 0))
+            else:
+                return None
+        
         # Check if we can trade at a reasonable ratio
         ratio = player.can_trade_to_bank(give, want, ports)
         if ratio is None:
@@ -266,6 +335,10 @@ class SmartAgent(Agent):
         # GREED mode: only accept trades that are advantageous (give 1, get 2+)
         if self.greed and ratio >= 1:  # ratio >= 1 means we have to give >=1 (bad deal in greed mode)
             return None
+        
+        # trade_chaos: sometimes accept worse ratios
+        if random.random() < self.trade_chaos:
+            ratio = min(4, ratio + random.randint(1, 2))  # Worse ratio (give more)
         
         if player.resources.get(give, 0) >= ratio:
             return {
@@ -278,7 +351,7 @@ class SmartAgent(Agent):
 
     def choose_player_trade(self, game, pid):
         """Find mutually beneficial trades - not just overpaying
-        Respects prob_trade and greed parameters
+        Respects prob_trade, greed, sheep_hoarder, and trade_chaos parameters
         """
         # Check if agent wants to trade this turn (based on prob_trade)
         if random.random() > self.prob_trade:
@@ -306,6 +379,10 @@ class SmartAgent(Agent):
         # What do we have excess of? (not what we need)
         abundant = [r for r in RESOURCES 
                    if player.resources.get(r, 0) >= 2 and r != want]
+        
+        # Sheep hoarder refuses to give sheep
+        if self.sheep_hoarder:
+            abundant = [r for r in abundant if r != 'sheep']
         
         if not abundant:
             return None
@@ -381,6 +458,10 @@ class SmartAgent(Agent):
             give_res = best_trade['give']
             want_res = best_trade['want']
             ratio = best_trade['ratio']
+            
+            # trade_chaos: sometimes make worse trades
+            if random.random() < self.trade_chaos:
+                ratio = min(3, ratio + 1)  # Give more
             
             if player.resources.get(give_res, 0) >= ratio:
                 return Action(

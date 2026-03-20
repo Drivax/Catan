@@ -16,7 +16,7 @@ from game.rules import RESOURCES, VICTORY_POINTS_TO_WIN
 
 class CatanGame:
 
-    def __init__(self, agents: list[Agent], num_players=4):
+    def __init__(self, agents: list[Agent], num_players=4, verbose=True):
 
         if len(agents) != num_players:
 
@@ -28,7 +28,9 @@ class CatanGame:
 
         self.players = [Player(i) for i in range(num_players)]
 
-        self.board = Board()
+        self.board = Board(verbose=verbose)
+
+        self.verbose = verbose
 
         self.longest_road_leader = None
 
@@ -41,6 +43,11 @@ class CatanGame:
         self.turn_number = 0
 
         self.winner = None
+
+    def _print(self, *args, **kwargs):
+        """Print only if verbose is enabled"""
+        if self.verbose:
+            print(*args, **kwargs)
 
  
 
@@ -60,106 +67,44 @@ class CatanGame:
         
         Settlements placed on best vertices (high probability numbers, resource diversity)
         """
+
         from game.map import get_corners
-        
         all_vertices = list(self.board.get_all_vertices())
         placed_vertices = set()
-        
-        def score_vertex(v):
-            """Score vertex: best numbers (5,6,8,9) + diversity bonus"""
-            score = 0.0
-            resources_present = set()
-            
-            for hex_pos, tile in self.board.hexes.items():
-                if v in get_corners(*hex_pos):
-                    if tile.number:
-                        if tile.number in [6, 8]:
-                            score += 3.0
-                        elif tile.number in [5, 9]:
-                            score += 2.0
-                        elif tile.number in [4, 10]:
-                            score += 1.0
-                        else:
-                            score += 0.1
-                    if tile.resource != 'desert':
-                        resources_present.add(tile.resource)
-            
-            # Heavy bonus for resource diversity
-            diversity = len(resources_present)
-            score += diversity * 2.0
-            
-            return score
 
-        # ROUND 1: Forward order (best available vertex for each player)
-        for pid in range(self.num_players):
+        # Randomize player order for snake draft
+        player_order = list(range(self.num_players))
+        random.shuffle(player_order)
+
+        # Snake draft: forward then reverse
+        draft_order = player_order + player_order[::-1]
+
+        for round_num, pid in enumerate(draft_order):
             player = self.players[pid]
-            
-            # Find best valid vertex among remaining
-            best_v = None
-            best_score = -1
-            
+            agent = self.agents[pid]
+
+            # Find valid vertices (not placed, not adjacent)
+            valid_vertices = []
             for v in all_vertices:
                 if v in placed_vertices:
                     continue
-                
-                # Check 1-edge distance: can't have settlements on adjacent vertices
                 neighbors = set(self.board.vertex_neighbors.get(v, []))
                 has_adjacent = any(pv in neighbors for pv in placed_vertices)
                 if not has_adjacent:
-                    v_score = score_vertex(v)
-                    if v_score > best_score:
-                        best_score = v_score
-                        best_v = v
-            
-            if best_v:
-                if self.board.place_settlement(pid, best_v):
-                    player.build_settlement(free_cost=True)
-                    placed_vertices.add(best_v)
-                    all_vertices.remove(best_v)
-                    print(f"J{pid} settlement 1/2 on {best_v} (score: {best_score:.1f})")
-                    
-                    produced = self.board.produce_from_vertex(best_v)
-                    if produced:
-                        player.add_resources(produced)
-            
-            # Place 1 road
-            possible_roads = self.board.get_possible_roads(pid)
-            if possible_roads:
-                edge = random.choice(possible_roads)
-                self.board.place_road(pid, edge)
-                player.build_road(free_cost=True)
+                    valid_vertices.append(v)
 
-        # ROUND 2: Reverse order (strategic placement)
-        for pid in range(self.num_players - 1, -1, -1):
-            player = self.players[pid]
-            
-            best_v = None
-            best_score = -1
-            
-            for v in all_vertices:
-                if v in placed_vertices:
-                    continue
-                
-                # Check 1-edge distance: can't have settlements on adjacent vertices
-                neighbors = set(self.board.vertex_neighbors.get(v, []))
-                has_adjacent = any(pv in neighbors for pv in placed_vertices)
-                if not has_adjacent:
-                    v_score = score_vertex(v)
-                    if v_score > best_score:
-                        best_score = v_score
-                        best_v = v
-            
-            if best_v:
-                if self.board.place_settlement(pid, best_v):
+            # Agent chooses settlement
+            chosen_v = agent.choose_starting_settlement(self, pid, valid_vertices)
+            if chosen_v and chosen_v in valid_vertices:
+                if self.board.place_settlement(pid, chosen_v):
                     player.build_settlement(free_cost=True)
-                    placed_vertices.add(best_v)
-                    all_vertices.remove(best_v)
-                    print(f"J{pid} settlement 2/2 on {best_v} (score: {best_score:.1f})")
-                    
-                    produced = self.board.produce_from_vertex(best_v)
+                    placed_vertices.add(chosen_v)
+                    all_vertices.remove(chosen_v)
+                    self._print(f"J{pid} settlement {1 if round_num < self.num_players else 2}/2 on {chosen_v}")
+                    produced = self.board.produce_from_vertex(chosen_v)
                     if produced:
                         player.add_resources(produced)
-            
+
             # Place 1 road
             possible_roads = self.board.get_possible_roads(pid)
             if possible_roads:
@@ -195,7 +140,7 @@ class CatanGame:
 
         dice = self.roll_dice()
 
-        print(f"[{self.turn_number:3d}] Player {self.current_player} rolls a {dice}")
+        self._print(f"[{self.turn_number:3d}] Player {self.current_player} rolls a {dice}")
 
  
 
@@ -209,7 +154,7 @@ class CatanGame:
 
                 if discarded:
 
-                    print(f"  J{p.pid} loses {dict(discarded)}")
+                    self._print(f"  J{p.pid} loses {dict(discarded)}")
 
             self.robber_turn = True
 
@@ -227,7 +172,7 @@ class CatanGame:
 
                 self.board.move_robber(new_pos)
 
-                print(f"  -> Voleur deplace de {old_pos} -> {new_pos}")
+                self._print(f"  -> Voleur deplace de {old_pos} -> {new_pos}")
 
             else:
 
@@ -237,7 +182,7 @@ class CatanGame:
 
                 self.board.move_robber(new_robber_pos)
 
-                print(f"  -> Voleur deplace aleatoirement sur {new_robber_pos}")
+                self._print(f"  -> Voleur deplace aleatoirement sur {new_robber_pos}")
 
  
 
@@ -269,11 +214,11 @@ class CatanGame:
 
                 player.resources[stolen_res] += 1
 
-                print(f"  -> J{self.current_player} vole {stolen_res} a J{victim_pid}")
+                self._print(f"  -> J{self.current_player} vole {stolen_res} a J{victim_pid}")
 
             else:
 
-                print("  -> Rien a voler")
+                self._print("  -> Rien a voler")
 
  
 
@@ -289,7 +234,7 @@ class CatanGame:
 
                     self.players[pid].add_resources(res)
 
-                    print(f"  -> J{pid} recoit {dict(res)}")
+                    self._print(f"  -> J{pid} recoit {dict(res)}")
 
  
 
@@ -305,7 +250,7 @@ class CatanGame:
 
             )
 
-            print(f"  J{p.pid} {p.victory_points:2d} pts -> {res_str}")
+            self._print(f"  J{p.pid} {p.victory_points:2d} pts -> {res_str}")
 
  
 
@@ -323,7 +268,7 @@ class CatanGame:
 
         port_types = self.board.get_player_ports(player.pid)
 
-        print(f"  Trade phase - ports accessibles : {port_types or 'None'}")
+        self._print(f"  Trade phase - ports accessibles : {port_types or 'None'}")
 
  
 
@@ -341,11 +286,11 @@ class CatanGame:
 
             if player.execute_bank_trade(give, receive, ratio):
 
-                print(f"  -> Trade banque {ratio}:1 | donne {ratio}x{give} -> recoit 1x{receive}")
+                self._print(f"  -> Trade banque {ratio}:1 | donne {ratio}x{give} -> recoit 1x{receive}")
 
             else:
 
-                print(f"  -> Trade impossible ({ratio}:1 {give} -> {receive})")
+                self._print(f"  -> Trade impossible ({ratio}:1 {give} -> {receive})")
 
  
 
@@ -369,7 +314,7 @@ class CatanGame:
 
                 player.build_settlement()
 
-                print(f"  -> Colonie sur {v} ({player.victory_points} pts)")
+                self._print(f"  -> Colonie sur {v} ({player.victory_points} pts)")
 
                 acted = True
 
@@ -383,7 +328,7 @@ class CatanGame:
 
                 player.build_city()
 
-                print(f"  -> Ville sur {v} ({player.victory_points} pts)")
+                self._print(f"  -> Ville sur {v} ({player.victory_points} pts)")
 
                 acted = True
 
@@ -397,7 +342,7 @@ class CatanGame:
 
                 player.build_road()
 
-                print(f"  -> Route sur {list(edge)}")
+                self._print(f"  -> Route sur {list(edge)}")
 
                 acted = True
 
@@ -407,7 +352,7 @@ class CatanGame:
 
         else:
 
-            print("  -> pass")
+            self._print("  -> pass")
 
  
 
@@ -417,7 +362,7 @@ class CatanGame:
 
             self.winner = player.pid
 
-            print(f"\nVICTOIRE joueur {player.pid} ({player.victory_points} points)")
+            self._print(f"\nVICTOIRE joueur {player.pid} ({player.victory_points} points)")
 
  
 
@@ -463,7 +408,7 @@ class CatanGame:
 
                     old.victory_points -= 2
 
-                    print(f"  Longest road perdu par J{self.longest_road_leader} (-2 pts)")
+                    self._print(f"  Longest road perdu par J{self.longest_road_leader} (-2 pts)")
 
                 # Donner les points au nouveau leader
 
@@ -471,7 +416,7 @@ class CatanGame:
 
                 new.victory_points += 2
 
-                print(f"  *** LONGEST ROAD *** J{leader} gagne +2 pts (longueur {max_len})")
+                self._print(f"  *** LONGEST ROAD *** J{leader} gagne +2 pts (longueur {max_len})")
 
                 self.longest_road_leader = leader
 
@@ -487,7 +432,7 @@ class CatanGame:
 
                 old.victory_points -= 2
 
-                print(f"  Longest road perdu par J{self.longest_road_leader} (plus de 5 routes)")
+                self._print(f"  Longest road perdu par J{self.longest_road_leader} (plus de 5 routes)")
 
                 self.longest_road_leader = None
 
@@ -511,7 +456,7 @@ class CatanGame:
 
         if self.winner is None:
 
-            print("Limite de tours atteinte, match nul force")
+            self._print("Limite de tours atteinte, match nul force")
 
         return self.winner
 
@@ -529,7 +474,7 @@ class CatanGame:
 
         player = self.players[pid]
 
-        print(f"  [Echange joueurs] J{pid} peut proposer un trade")
+        self._print(f"  [Echange joueurs] J{pid} peut proposer un trade")
 
  
 
@@ -557,7 +502,7 @@ class CatanGame:
 
  
 
-        print(f"  -> J{pid} propose a J{target_pid} : {give_amount}x{give_res} contre {receive_amount}x{receive_res}")
+        self._print(f"  -> J{pid} propose a J{target_pid} : {give_amount}x{give_res} contre {receive_amount}x{receive_res}")
 
  
 
@@ -619,16 +564,16 @@ class CatanGame:
 
         if accept:
 
-            print(f"  -> J{target_pid} accepte")
+            self._print(f"  -> J{target_pid} accepte")
 
             player.execute_trade(give_res, give_amount, receive_res, receive_amount)
 
             target.execute_trade(receive_res, receive_amount, give_res, give_amount)
 
-            print(f"  -> J{pid} donne {give_amount} {give_res} -> recoit {receive_amount} {receive_res}")
+            self._print(f"  -> J{pid} donne {give_amount} {give_res} -> recoit {receive_amount} {receive_res}")
 
-            print(f"  -> J{target_pid} donne {receive_amount} {receive_res} -> recoit {give_amount} {give_res}")
+            self._print(f"  -> J{target_pid} donne {receive_amount} {receive_res} -> recoit {give_amount} {give_res}")
 
         else:
 
-            print(f"  -> J{target_pid} refuse")
+            self._print(f"  -> J{target_pid} refuse")

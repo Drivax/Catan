@@ -6,6 +6,26 @@ from game.rules import RESOURCES
 
 class RandomAgent(Agent):
 
+    def __init__(self, trade_chaos=0.0, sheep_hoarder=False, dumb_thief=False):
+        """
+        Args:
+            trade_chaos (float): Probability of offering/accepting bad trades [0.0-1.0]
+            sheep_hoarder (bool or float): If True/1.0, refuses to give sheep away
+            dumb_thief (bool): If True, always steals from leader instead of weakest player
+        """
+        super().__init__()
+        self.trade_chaos = max(0.0, min(1.0, trade_chaos))  # Clamp [0, 1]
+        self.sheep_hoarder = 1 if sheep_hoarder else 0
+        self.dumb_thief = 1 if dumb_thief else 0
+
+    def choose_starting_settlement(self, game, pid, valid_vertices):
+        """
+        Choose starting settlement randomly from valid options.
+        """
+        if not valid_vertices:
+            return None
+        return random.choice(valid_vertices)
+
  
 
     def choose_action(self, game, player_id):
@@ -20,21 +40,27 @@ class RandomAgent(Agent):
 
         if hasattr(game, 'robber_turn') and game.robber_turn:
 
-            best_hex = None
-
-            max_opponents = -1
-
-            for hex_pos in board.get_all_hexes():
-
-                adj = board.get_adjacent_players(hex_pos)
-
-                opponents = len([p for p, _ in adj if p != player_id])
-
-                if opponents > max_opponents:
-
-                    max_opponents = opponents
-
-                    best_hex = hex_pos
+            if self.dumb_thief:
+                # Dumb thief: always target the leader
+                leader_pid = max(range(game.num_players), key=lambda i: game.players[i].victory_points)
+                best_hex = None
+                for hex_pos in board.get_all_hexes():
+                    adj = board.get_adjacent_players(hex_pos)
+                    if any(p == leader_pid for p, _ in adj):
+                        best_hex = hex_pos
+                        break
+                if not best_hex:
+                    best_hex = random.choice(board.get_all_hexes())
+            else:
+                # Normal: target hex with most opponents
+                best_hex = None
+                max_opponents = -1
+                for hex_pos in board.get_all_hexes():
+                    adj = board.get_adjacent_players(hex_pos)
+                    opponents = len([p for p, _ in adj if p != player_id])
+                    if opponents > max_opponents:
+                        max_opponents = opponents
+                        best_hex = hex_pos
 
             target = best_hex if best_hex else random.choice(board.get_all_hexes())
 
@@ -112,9 +138,7 @@ class RandomAgent(Agent):
 
         Decide si on fait un trade banque (4:1 / 3:1 / 2:1).
 
-        FIX: retourne un dict avec les cles 'give', 'receive', 'ratio'
-
-        (compatible avec core.py) ou None.
+        Respects trade_chaos and sheep_hoarder parameters.
 
         """
 
@@ -139,6 +163,13 @@ class RandomAgent(Agent):
             return None
 
         abundant = max(player.resources, key=player.resources.get)
+
+        # Sheep hoarder refuses to give sheep
+
+        if self.sheep_hoarder and abundant == 'sheep':
+
+            return None
+
 
         if player.resources[abundant] < 2:
 
@@ -166,6 +197,13 @@ class RandomAgent(Agent):
 
         if ratio:
 
+            # trade_chaos: sometimes make bad trades (give more than good ratio)
+
+            if random.random() < self.trade_chaos:
+
+                ratio = min(4, ratio + random.randint(1, 2))  # Worse ratio (give more)
+
+
             # FIX: retourner un dict avec les cles attendues par core.py
 
             return {
@@ -188,7 +226,7 @@ class RandomAgent(Agent):
 
         Propose un echange avec un autre joueur.
 
-        Retourne un dict ou None.
+        Respects trade_chaos and sheep_hoarder parameters.
 
         """
 
@@ -205,6 +243,23 @@ class RandomAgent(Agent):
  
 
         give_res = max(player.resources, key=player.resources.get)
+
+        # Sheep hoarder refuses to give sheep
+
+        if self.sheep_hoarder and give_res == 'sheep':
+
+            # Choose a different resource if possible
+
+            alternatives = [r for r in RESOURCES if player.resources.get(r, 0) > 0 and r != 'sheep']
+
+            if alternatives:
+
+                give_res = max(alternatives, key=lambda r: player.resources.get(r, 0))
+
+            else:
+
+                return None
+
 
         if player.resources[give_res] < 1:
 
@@ -227,6 +282,13 @@ class RandomAgent(Agent):
  
 
         give_amount = 1 if player.resources[give_res] <= 3 else 2
+
+
+        # trade_chaos: sometimes make bad trades (give more than receiving)
+
+        if random.random() < self.trade_chaos:
+
+            give_amount = min(3, give_amount + 1)  # Give more
 
  
 

@@ -86,11 +86,13 @@ class HexTile:
 
 class Board:
 
-    def __init__(self):
+    def __init__(self, verbose=True):
 
         tiles_resources = list(HEX_RESOURCES_DISTRIB)
 
         numbers = list(HEX_NUMBERS_DISTRIB)
+
+        self.verbose = verbose
 
         random.shuffle(tiles_resources)
 
@@ -624,7 +626,8 @@ class Board:
 
                     produced[pid][tile.resource] += amt
 
-                    print(f"  +{amt} {tile.resource} -> J{pid} (vertex {vkey}, hex {hex_pos})")
+                    if self.verbose:
+                        print(f"  +{amt} {tile.resource} -> J{pid} (vertex {vkey}, hex {hex_pos})")
 
         return produced
 
