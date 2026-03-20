@@ -42,6 +42,10 @@ def compare_agents(agent_template, num_games=100, max_turns=500):
             params.append(f"sheep_hoarder={agent.sheep_hoarder}")
         if hasattr(agent, 'dumb_thief'):
             params.append(f"dumb_thief={agent.dumb_thief}")
+        if hasattr(agent, 'city_first'):
+            params.append(f"city_first={agent.city_first}")
+        if hasattr(agent, 'port_lover'):
+            params.append(f"port_lover={agent.port_lover}")
         legend = f"Player {i}: " + ", ".join(params)
         agent_legends.append(legend)
     

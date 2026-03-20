@@ -15,7 +15,7 @@ class SmartAgent(Agent):
     - Trades banque/joueurs : configurables
     """
 
-    def __init__(self, prob_trade=0.7, road_maker=0, greed=0, prob_weight=1.0, diversity_weight=1.0, trade_chaos=0.0, sheep_hoarder=False, dumb_thief=False):
+    def __init__(self, prob_trade=0.7, road_maker=0, greed=0, prob_weight=1.0, diversity_weight=1.0, trade_chaos=0.0, sheep_hoarder=False, dumb_thief=False, city_first=0.0, port_lover=False):
         """
         Args:
             prob_trade (float): Probabilité de vouloir faire un trade à chaque tour [0-1]
@@ -26,6 +26,8 @@ class SmartAgent(Agent):
             trade_chaos (float): Probability of offering/accepting bad trades [0.0-1.0]
             sheep_hoarder (bool or float): If True/1.0, refuses to give sheep away
             dumb_thief (bool): If True, always steals from leader instead of weakest
+            city_first (float): Bias toward upgrading settlements to cities ASAP [0.0-10.0]
+            port_lover (bool): If True, strongly prefers building near ports
         """
         super().__init__()
         self.last_upgraded_vertex = None
@@ -37,11 +39,14 @@ class SmartAgent(Agent):
         self.trade_chaos = max(0.0, min(1.0, trade_chaos))  # Clamp [0, 1]
         self.sheep_hoarder = 1 if sheep_hoarder else 0
         self.dumb_thief = 1 if dumb_thief else 0
+        self.city_first = max(0.0, min(10.0, city_first))  # Clamp [0, 10]
+        self.port_lover = 1 if port_lover else 0
 
     def choose_starting_settlement(self, game, pid, valid_vertices):
         """
         Choose starting settlement based on weighted tile probability and resource diversity.
         If road_maker=1, prioritize vertices with brick tiles.
+        If port_lover=1, prioritize vertices with port access.
         """
         board = game.board
         from game.map import get_corners
@@ -51,6 +56,7 @@ class SmartAgent(Agent):
             prob_score = 0.0
             resources_present = set()
             brick_bonus = 0.0
+            port_bonus = 0.0
             for hex_pos, tile in board.hexes.items():
                 if v in get_corners(*hex_pos):
                     if tile.number:
@@ -68,8 +74,11 @@ class SmartAgent(Agent):
                     # road_maker bonus: prioritize brick tiles
                     if self.road_maker and tile.resource == 'brick':
                         brick_bonus += 5.0
+            # port_lover bonus: prioritize vertices with port access
+            if self.port_lover and self._has_port_access(board, v):
+                port_bonus = 8.0
             diversity = len(resources_present)
-            score = self.prob_weight * prob_score + self.diversity_weight * diversity + brick_bonus
+            score = self.prob_weight * prob_score + self.diversity_weight * diversity + brick_bonus + port_bonus
             if score > best_score:
                 best_score = score
                 best_v = v
@@ -91,14 +100,19 @@ class SmartAgent(Agent):
                 best_edge = max(possible_roads, key=lambda e: self._road_value(board, e, pid))
                 return Action('build_road', best_edge)
 
-        # 2. UPGRADE TO CITY - but only after 4+ settlements
+        # 2. UPGRADE TO CITY - threshold based on city_first parameter
         own_settlements = [
             v for v, (p, t) in board.buildings.items()
             if p == pid and t == 'settlement' and v != self.last_upgraded_vertex
         ]
         num_settlements = sum(1 for (p, t) in board.buildings.values() if p == pid and t == 'settlement')
         
-        if player.can_build_city() and own_settlements and num_settlements >= 4:
+        # city_first bias: higher values lower the settlement count threshold
+        # city_first=0: need 4+ settlements (default)
+        # city_first=10: upgrade as soon as 1 settlement exists
+        upgrade_threshold = max(1, int(4 - (self.city_first * 0.3)))
+        
+        if player.can_build_city() and own_settlements and num_settlements >= upgrade_threshold:
             best_v = max(own_settlements, key=lambda v: self._vertex_value(board, v))
             self.last_upgraded_vertex = best_v
             return Action('build_city', best_v)
@@ -135,6 +149,13 @@ class SmartAgent(Agent):
             return Action('build_road', best_edge)
 
         return Action('pass')
+
+    def _has_port_access(self, board, vertex):
+        """Check if a vertex has access to any port"""
+        for port in board.ports:
+            if vertex in port['vertices']:
+                return True
+        return False
 
     def _choose_robber_move(self, game, pid):
         """AGGRESSIVE robber blocking - prioritize leader or dumb mode"""
@@ -203,7 +224,8 @@ class SmartAgent(Agent):
         return Action('move_robber', random.choice(board.get_all_hexes()))
 
     def _vertex_value(self, board, vertex):
-        """Score vertices aggressively - prioritize RESOURCE DIVERSITY for early game"""
+        """Score vertices aggressively - prioritize RESOURCE DIVERSITY for early game
+        If port_lover=1, also strongly prefer vertices with port access"""
         score = 0.0
         
         # Find all hexes this vertex touches
@@ -223,6 +245,11 @@ class SmartAgent(Agent):
                     else:
                         number_score += 1.0
         
+        # port_lover bonus: strong preference for ports
+        port_bonus = 0.0
+        if self.port_lover and self._has_port_access(board, vertex):
+            port_bonus = 10.0
+        
         # HEAVILY prioritize resource diversity - EMERGENCY if only touching 1 resource
         diversity = len(resources_present)
         if diversity == 1:
@@ -240,6 +267,7 @@ class SmartAgent(Agent):
             # Best possible - 3 different resources
             score += number_score + 5.0
         
+        score += port_bonus
         return score
 
     def _road_value(self, board, edge, player_id):

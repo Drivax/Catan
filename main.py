@@ -15,6 +15,9 @@ def main():
     - trade_chaos (float 0-1): Probability of offering/accepting bad trades (default 0.0)
     - sheep_hoarder (bool or float): If True/1.0, refuses to give sheep away (default False)
     - dumb_thief (bool): If True, always steals from leader instead of weakest (default False)
+    - city_first (float 0-10): Very high bias toward upgrading settlements to cities ASAP (default 0.0)
+      "The Mayor" — few settlements, tall cities (higher values = upgrade earlier)
+    - port_lover (bool): If True, strongly prefers building near ports even at bad locations (default False)
     
     RandomAgent parameters:
     - trade_chaos (float 0-1): Probability of offering/accepting bad trades (default 0.0)
@@ -26,6 +29,9 @@ def main():
         SmartAgent(road_maker=1) - Prioritizes roads and brick tiles for starting
         SmartAgent(prob_weight=2.0, diversity_weight=1.0) - Favor probability over diversity
         SmartAgent(sheep_hoarder=True, dumb_thief=True) - Sheep hoarder with dumb robber
+        SmartAgent(city_first=8.0) - "The Mayor" - upgrades to cities very early
+        SmartAgent(port_lover=True) - Focuses on ports for trading advantage
+        SmartAgent(city_first=5.0, port_lover=True) - Mayor who controls ports
         RandomAgent(trade_chaos=0.5) - Sometimes makes bad trades
         RandomAgent(sheep_hoarder=True) - Never gives away sheep
         RandomAgent(dumb_thief=True) - Always targets the leader
