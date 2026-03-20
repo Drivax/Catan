@@ -182,6 +182,12 @@ class RandomAgent(Agent):
 
  
 
+    def choose_initial_settlement(self, game, player_id, valid_vertices):
+        """Choose a random valid vertex for initial settlement placement."""
+        if not valid_vertices:
+            return None
+        return random.choice(valid_vertices)
+
     def choose_player_trade(self, game, pid):
 
         """

@@ -54,118 +54,75 @@ class CatanGame:
 
     def setup(self):
         """
-        Strategic Catan setup - use agent vertex evaluation:
-        - Round 1: Players 0,1,2,3 each place a settlement and road + COLLECT RESOURCES
-        - Round 2: Players 3,2,1,0 each place a settlement and road + COLLECT RESOURCES
-        
-        Settlements placed on best vertices (high probability numbers, resource diversity)
+        Catan setup with randomized snake-draft order:
+        - A random permutation of players is chosen at the start of each game.
+        - Round 1 (forward): each player places 1 settlement + 1 road and collects
+          resources from the adjacent hex tiles.
+        - Round 2 (reverse): players go in the opposite order, each placing their
+          2nd settlement + 1 road and collecting resources.
+        The last player in Round 1 therefore places twice in a row (standard Catan
+        snake draft).  Settlement placement is delegated to each agent.
         """
-        from game.map import get_corners
-        
         all_vertices = list(self.board.get_all_vertices())
         placed_vertices = set()
-        
-        def score_vertex(v):
-            """Score vertex: best numbers (5,6,8,9) + diversity bonus"""
-            score = 0.0
-            resources_present = set()
-            
-            for hex_pos, tile in self.board.hexes.items():
-                if v in get_corners(*hex_pos):
-                    if tile.number:
-                        if tile.number in [6, 8]:
-                            score += 3.0
-                        elif tile.number in [5, 9]:
-                            score += 2.0
-                        elif tile.number in [4, 10]:
-                            score += 1.0
-                        else:
-                            score += 0.1
-                    if tile.resource != 'desert':
-                        resources_present.add(tile.resource)
-            
-            # Heavy bonus for resource diversity
-            diversity = len(resources_present)
-            score += diversity * 2.0
-            
-            return score
 
-        # ROUND 1: Forward order (best available vertex for each player)
-        for pid in range(self.num_players):
-            player = self.players[pid]
-            
-            # Find best valid vertex among remaining
-            best_v = None
-            best_score = -1
-            
+        # Randomize player order for this game (changes every game)
+        player_order = list(range(self.num_players))
+        random.shuffle(player_order)
+        print(f"Setup order: {player_order}")
+
+        def get_valid_vertices():
+            """Vertices that are unoccupied and not adjacent to any placed settlement."""
+            result = []
             for v in all_vertices:
                 if v in placed_vertices:
                     continue
-                
-                # Check 1-edge distance: can't have settlements on adjacent vertices
                 neighbors = set(self.board.vertex_neighbors.get(v, []))
-                has_adjacent = any(pv in neighbors for pv in placed_vertices)
-                if not has_adjacent:
-                    v_score = score_vertex(v)
-                    if v_score > best_score:
-                        best_score = v_score
-                        best_v = v
-            
-            if best_v:
-                if self.board.place_settlement(pid, best_v):
-                    player.build_settlement(free_cost=True)
-                    placed_vertices.add(best_v)
-                    all_vertices.remove(best_v)
-                    print(f"J{pid} settlement 1/2 on {best_v} (score: {best_score:.1f})")
-                    
-                    produced = self.board.produce_from_vertex(best_v)
-                    if produced:
-                        player.add_resources(produced)
-            
-            # Place 1 road
+                if not any(pv in neighbors for pv in placed_vertices):
+                    result.append(v)
+            return result
+
+        def place_one_settlement(pid, settlement_num):
+            player = self.players[pid]
+            valid_vertices = get_valid_vertices()
+
+            if not valid_vertices:
+                return
+
+            chosen_v = None
+            try:
+                chosen_v = self.agents[pid].choose_initial_settlement(self, pid, valid_vertices)
+            except Exception as exc:
+                print(f"  WARNING: agent {pid} raised an error in choose_initial_settlement: {exc}. Falling back to random.")
+
+            # Fallback to random if the agent returned an invalid vertex
+            if chosen_v is None or chosen_v not in valid_vertices:
+                chosen_v = random.choice(valid_vertices)
+
+            if self.board.place_settlement(pid, chosen_v):
+                player.build_settlement(free_cost=True)
+                placed_vertices.add(chosen_v)
+                all_vertices.remove(chosen_v)
+                print(f"J{pid} settlement {settlement_num}/2 on {chosen_v}")
+
+                produced = self.board.produce_from_vertex(chosen_v)
+                if produced:
+                    player.add_resources(produced)
+
+            # Place 1 road (random direction from the new settlement)
             possible_roads = self.board.get_possible_roads(pid)
             if possible_roads:
                 edge = random.choice(possible_roads)
                 self.board.place_road(pid, edge)
                 player.build_road(free_cost=True)
 
-        # ROUND 2: Reverse order (strategic placement)
-        for pid in range(self.num_players - 1, -1, -1):
-            player = self.players[pid]
-            
-            best_v = None
-            best_score = -1
-            
-            for v in all_vertices:
-                if v in placed_vertices:
-                    continue
-                
-                # Check 1-edge distance: can't have settlements on adjacent vertices
-                neighbors = set(self.board.vertex_neighbors.get(v, []))
-                has_adjacent = any(pv in neighbors for pv in placed_vertices)
-                if not has_adjacent:
-                    v_score = score_vertex(v)
-                    if v_score > best_score:
-                        best_score = v_score
-                        best_v = v
-            
-            if best_v:
-                if self.board.place_settlement(pid, best_v):
-                    player.build_settlement(free_cost=True)
-                    placed_vertices.add(best_v)
-                    all_vertices.remove(best_v)
-                    print(f"J{pid} settlement 2/2 on {best_v} (score: {best_score:.1f})")
-                    
-                    produced = self.board.produce_from_vertex(best_v)
-                    if produced:
-                        player.add_resources(produced)
-            
-            # Place 1 road
-            possible_roads = self.board.get_possible_roads(pid)
-            if possible_roads:
-                edge = random.choice(possible_roads)
-                self.board.place_road(pid, edge)
-                player.build_road(free_cost=True)
+        # ROUND 1: forward order
+        for pid in player_order:
+            place_one_settlement(pid, 1)
+
+        # ROUND 2: reverse order (snake draft – last player goes first)
+        for pid in reversed(player_order):
+            place_one_settlement(pid, 2)
 
  
 

@@ -15,18 +15,55 @@ class SmartAgent(Agent):
     - Trades banque/joueurs : configurables
     """
 
-    def __init__(self, prob_trade=0.7, road_maker=0, greed=0):
+    def __init__(self, prob_trade=0.7, road_maker=0, greed=0, weight_prob=1.0, weight_diversity=1.0):
         """
         Args:
             prob_trade (float): Probabilité de vouloir faire un trade à chaque tour [0-1]
             road_maker (int): 0=normal, 1=maximiser construction de routes
             greed (int): 0=normal, 1=seulement trades avantageux (1 ressource contre 2+)
+            weight_prob (float): Poids pour la proximité du chiffre 7 lors du placement initial [>=0]
+            weight_diversity (float): Poids pour la diversité des ressources lors du placement initial [>=0]
         """
         super().__init__()
         self.last_upgraded_vertex = None
         self.prob_trade = max(0.0, min(1.0, prob_trade))  # Clamp [0, 1]
         self.road_maker = 1 if road_maker else 0
         self.greed = 1 if greed else 0
+        self.weight_prob = max(0.0, weight_prob)
+        self.weight_diversity = max(0.0, weight_diversity)
+
+    def choose_initial_settlement(self, game, player_id, valid_vertices):
+        """Choose the best vertex for initial settlement placement.
+
+        Scores each candidate vertex using a weighted combination of:
+        - Probability score: sum of (6 - |number - 7|) for each adjacent hex with a
+          number token.  This equals the number of ways to roll that tile's number, so
+          higher values mean more frequent production.
+        - Diversity score: number of distinct resource types among adjacent hexes.
+
+        The trade-off between the two criteria is controlled by ``weight_prob`` and
+        ``weight_diversity``.
+        """
+        if not valid_vertices:
+            return None
+        return max(valid_vertices, key=lambda v: self._initial_vertex_score(game.board, v))
+
+    def _initial_vertex_score(self, board, vertex):
+        """Score a vertex for initial placement using weight_prob and weight_diversity."""
+        prob_score = 0.0
+        resources_present = set()
+
+        for hex_pos, tile in board.hexes.items():
+            if vertex in get_corners(*hex_pos):
+                if tile.number:
+                    # Number of dice combinations (out of 36) that produce tile.number:
+                    # e.g. 7 → 6 combos, 6 or 8 → 5 combos, 2 or 12 → 1 combo
+                    prob_score += 6 - abs(tile.number - 7)
+                if tile.resource and tile.resource != 'desert':
+                    resources_present.add(tile.resource)
+
+        diversity_score = float(len(resources_present))
+        return self.weight_prob * prob_score + self.weight_diversity * diversity_score
 
     def choose_action(self, game, pid):
         player = game.players[pid]
