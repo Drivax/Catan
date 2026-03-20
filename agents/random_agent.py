@@ -1,12 +1,8 @@
-# agents/random_agent.py
-
 import random
 
 from agents.base import Agent, Action
 
 from game.rules import RESOURCES
-
- 
 
 class RandomAgent(Agent):
 

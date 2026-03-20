@@ -1,5 +1,3 @@
- # player.py
-
 from collections import Counter
 
 from game.rules import COST_ROAD, COST_SETTLEMENT, COST_CITY, VICTORY_POINTS_TO_WIN, POINTS_DIC

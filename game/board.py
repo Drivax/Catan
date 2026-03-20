@@ -1,5 +1,3 @@
-# board.py - Tiles coordinates, intersections...
-
 import random
 
 from collections import Counter, defaultdict
@@ -548,10 +546,16 @@ class Board:
 
             return False
 
+        # Check 2-edge distance rule: can't have settlements on adjacent vertices
+        # Get all neighbors of vkey (1 edge away)
+        neighbors = set(self.vertex_neighbors.get(vkey, []))
+        
         for existing_v in self.buildings:
-
-            if self.approx_distance(vkey, existing_v) < 2:
-
+            # Reject if existing is on same vertex (impossible but safe)
+            if existing_v == vkey:
+                return False
+            # Reject if existing is adjacent (1 edge away)
+            if existing_v in neighbors:
                 return False
 
         self.buildings[vkey] = (pid, 'settlement')

@@ -1,4 +1,3 @@
-# agents/smart_agent.py
 import random
 from collections import Counter
 from agents.base import Agent, Action
@@ -8,55 +7,85 @@ from game.map import get_corners
 
 class SmartAgent(Agent):
     """
-    Agent intelligent pour Catan :
+    Agent intelligent pour Catan avec comportements configurables:
     - Priorise les villes (gain +1 point immédiat)
     - Villages sur les meilleurs spots (numéros chauds + diversité)
     - Routes pour ouvrir des spots à fort potentiel ou bloquer
     - Voleur : cible les leaders ou les joueurs riches
-    - Trades banque : seulement quand excès clair et besoin réel
-    - Trades joueurs : rares et seulement très avantageux
+    - Trades banque/joueurs : configurables
     """
 
-    def __init__(self):
+    def __init__(self, prob_trade=0.7, road_maker=0, greed=0):
+        """
+        Args:
+            prob_trade (float): Probabilité de vouloir faire un trade à chaque tour [0-1]
+            road_maker (int): 0=normal, 1=maximiser construction de routes
+            greed (int): 0=normal, 1=seulement trades avantageux (1 ressource contre 2+)
+        """
         super().__init__()
-        # Petite mémoire pour éviter de toujours upgrader le même settlement
         self.last_upgraded_vertex = None
+        self.prob_trade = max(0.0, min(1.0, prob_trade))  # Clamp [0, 1]
+        self.road_maker = 1 if road_maker else 0
+        self.greed = 1 if greed else 0
 
     def choose_action(self, game, pid):
         player = game.players[pid]
         board = game.board
 
-        # 1. Priorité absolue : voleur si c'est le tour du voleur
+        # 1. Robber if triggered
         if hasattr(game, 'robber_turn') and game.robber_turn:
             return self._choose_robber_move(game, pid)
 
-        # 2. AGGRESSIVE: Construire une ville si possible (gain +1 point = +10% vers la victoire)
+        # Determine priority: road_maker prioritizes routes before settlements
+        if self.road_maker:
+            # ROAD_MAKER MODE: Build roads aggressively
+            possible_roads = board.get_possible_roads(pid)
+            if player.can_build_road() and possible_roads:
+                best_edge = max(possible_roads, key=lambda e: self._road_value(board, e, pid))
+                return Action('build_road', best_edge)
+
+        # 2. UPGRADE TO CITY - but only after 4+ settlements
         own_settlements = [
             v for v, (p, t) in board.buildings.items()
             if p == pid and t == 'settlement' and v != self.last_upgraded_vertex
         ]
-        if player.can_build_city() and own_settlements:
+        num_settlements = sum(1 for (p, t) in board.buildings.values() if p == pid and t == 'settlement')
+        
+        if player.can_build_city() and own_settlements and num_settlements >= 4:
             best_v = max(own_settlements, key=lambda v: self._vertex_value(board, v))
             self.last_upgraded_vertex = best_v
             return Action('build_city', best_v)
 
-        # 3. AGGRESSIVE: Nouveau village sur le meilleur spot disponible
+        # 3. BUILD NEW SETTLEMENT - URGENT PRIORITY (before board fills)
         free_vertices = [v for v in board.get_all_vertices() if v not in board.buildings]
-        if player.can_build_settlement() and free_vertices:
-            best_v = max(free_vertices, key=lambda v: self._vertex_value(board, v))
+        
+        # Get valid settlement spots - must check 1-edge distance (neighbors only)
+        valid_settle_spots = []
+        for v in free_vertices:
+            # Check if any existing settlement is adjacent (in neighbors)
+            neighbors = set(board.vertex_neighbors.get(v, []))
+            has_adjacent = any(existing in neighbors for existing in board.buildings.keys())
+            if not has_adjacent:
+                valid_settle_spots.append(v)
+        
+        # If valid spots exist and we have resources, BUILD IMMEDIATELY
+        if player.can_build_settlement() and valid_settle_spots:
+            best_v = max(valid_settle_spots, key=lambda v: self._vertex_value(board, v))
             return Action('build_settlement', best_v)
+        
+        # If we have settlement resources but NO valid spots, build roads
+        has_settlement_resources = all(player.resources.get(r, 0) >= 1 for r in ['wood', 'brick', 'sheep', 'wheat'])
+        if has_settlement_resources and not valid_settle_spots:
+            possible_roads = board.get_possible_roads(pid)
+            if player.can_build_road() and possible_roads:
+                best_edge = max(possible_roads, key=lambda e: self._road_value(board, e, pid))
+                return Action('build_road', best_edge)
 
-        # 4. Route : seulement si on have clear path to unbuilt spot
+        # 4. BUILD ROADS - expand territory for future opportunities
         possible_roads = board.get_possible_roads(pid)
         if player.can_build_road() and possible_roads:
-            # Only build roads that lead to good expansion spots
-            good_roads = [
-                e for e in possible_roads 
-                if self._road_value(board, e, pid) > 2.0  # Higher threshold
-            ]
-            if good_roads:
-                best_edge = max(good_roads, key=lambda e: self._road_value(board, e, pid))
-                return Action('build_road', best_edge)
+            best_edge = max(possible_roads, key=lambda e: self._road_value(board, e, pid))
+            return Action('build_road', best_edge)
 
         return Action('pass')
 
@@ -114,53 +143,59 @@ class SmartAgent(Agent):
         return Action('move_robber', random.choice(board.get_all_hexes()))
 
     def _vertex_value(self, board, vertex):
-        """Aggressively score vertices - weight best production heavily"""
+        """Score vertices aggressively - prioritize RESOURCE DIVERSITY for early game"""
         score = 0.0
-
+        
+        # Find all hexes this vertex touches
+        resources_present = Counter()
+        number_score = 0.0
+        
         for hex_pos, tile in board.hexes.items():
             if vertex in get_corners(*hex_pos):
+                if tile.resource != 'desert':
+                    resources_present[tile.resource] += 1
                 if tile.number:
-                    # Extreme weights for best numbers (6, 8 appear most frequently)
-                    val_map = {
-                        6: 5.0,   # Most common
-                        8: 5.0,
-                        5: 3.5,   # Good
-                        9: 3.5,
-                        4: 2.0,   # Decent
-                        10: 2.0,
-                        3: 1.0,   # Poor
-                        11: 1.0,
-                        2: 0.3,   # Rare
-                        12: 0.3
-                    }
-                    score += val_map.get(tile.number, 0.0)
-
-        # Heavy bonus for resource diversity (settlement produces multiple resources)
-        resources_present = set()
-        for hex_pos, tile in board.hexes.items():
-            if vertex in get_corners(*hex_pos) and tile.resource != 'desert':
-                resources_present.add(tile.resource)
+                    # Score for production probability
+                    if tile.number in [6, 8]:
+                        number_score += 3.0
+                    elif tile.number in [5, 9]:
+                        number_score += 2.0
+                    else:
+                        number_score += 1.0
         
-        # Quadratic bonus for diversity (3 resources = 2x better than 1)
-        diversity_bonus = len(resources_present) ** 1.5
-        score += diversity_bonus
-
+        # HEAVILY prioritize resource diversity - EMERGENCY if only touching 1 resource
+        diversity = len(resources_present)
+        if diversity == 1:
+            # Single resource - bonus for settlements, but still score it
+            resource_type = list(resources_present.keys())[0]
+            if resource_type == 'ore':
+                score += 0.1  # Ore is scarce, still valuable
+            elif resource_type in ['wheat', 'sheep']:
+                score += 0.05  # Medium value
+            else:
+                score += 0.0  # Brick/wood less critical early
+        elif diversity == 2:
+            score += number_score + 1.0
+        elif diversity == 3:
+            # Best possible - 3 different resources
+            score += number_score + 5.0
+        
         return score
 
     def _road_value(self, board, edge, player_id):
-        """Only build roads that open HIGH-VALUE settlement spots"""
+        """Score roads - in early game accept any connected road; later prioritize good spots"""
         v1, v2 = list(edge)
-        score = 0.0
-
+        score = 0.5  # Base score - all roads have some value for expanding territory
+        
         for v in (v1, v2):
-            # Must connect to our buildings
+            # Major bonus if it connects to our buildings
             if v in board.buildings and board.buildings[v][0] == player_id:
-                score += 5.0
+                score += 3.0
             else:
-                # Only minor score if it connects to our road network
-                score += 0.5
-
-            # Check if it opens access to a valuable free vertex
+                # Minor score if extends our road network to new territory
+                score += 0.3
+            
+            # Check if it opens access to valuable free vertices
             free_neighbors = [
                 nv for nv in board.vertex_neighbors.get(v, [])
                 if nv not in board.buildings
@@ -171,136 +206,192 @@ class SmartAgent(Agent):
                     (self._vertex_value(board, nv) for nv in free_neighbors),
                     default=0
                 )
-                # Must open to a GOOD spot
-                if best_neighbor_value > 3.0:
-                    score += best_neighbor_value * 1.5
-            
-            # Small bonus for blocking opponents (only if opening to good spot)
-            for nv in board.vertex_neighbors.get(v, []):
-                if nv in board.buildings and board.buildings[nv][0] != player_id:
-                    score += 1.0
+                # Bonus for opening good spots
+                score += best_neighbor_value * 0.3
 
         return score
 
     def choose_trade(self, game, pid):
-        """AGGRESSIVE bank trading to get resources for building"""
+        """Bank trading - smart conversions for building resources
+        Respects prob_trade and greed parameters
+        """
+        # Check if agent wants to trade this turn (based on prob_trade)
+        if random.random() > self.prob_trade:
+            return None
+            
         player = game.players[pid]
         ports = game.board.get_player_ports(pid)
 
         total = sum(player.resources.values())
         
-        # What do we need for next building action?
-        need_settlement = not all(player.resources.get(r, 0) >= 1 for r in ['wood', 'brick', 'sheep', 'wheat'])
-        need_city = player.resources.get('wheat', 0) < 2 or player.resources.get('ore', 0) < 3
-        need_road = not all(player.resources.get(r, 0) >= 1 for r in ['wood', 'brick'])
-
-        # Identify what we're missing (lowest resource that we need)
-        missing = []
-        if need_settlement or need_city or need_road:
-            for r in RESOURCES:
-                current = player.resources.get(r, 0)
-                if (need_settlement and r in ['wood', 'brick', 'sheep', 'wheat'] and current < 1) or \
-                   (need_city and r == 'wheat' and current < 2) or \
-                   (need_city and r == 'ore' and current < 3) or \
-                   (need_road and r in ['wood', 'brick'] and current < 1):
-                    missing.append((r, current))
-
-        if not missing:
-            return None
-
-        # Find what we have in excess
-        want_resource = min(missing, key=lambda x: x[1])[0]  # Most scarce of what we need
+        # Already have everything needed? Don't trade
+        can_build_settlement = all(player.resources.get(r, 0) >= 1 for r in ['wood', 'brick', 'sheep', 'wheat'])
+        can_build_city = player.resources.get('wheat', 0) >= 2 and player.resources.get('ore', 0) >= 3
         
-        # Find abundant resource we can trade
-        abundant_options = [(r, player.resources.get(r, 0)) for r in RESOURCES 
-                           if player.resources.get(r, 0) >= 2 and r != want_resource]
-        
-        if not abundant_options:
+        if can_build_settlement or can_build_city:
             return None
-
-        give_resource = max(abundant_options, key=lambda x: x[1])[0]
-
-        ratio = player.can_trade_to_bank(give_resource, want_resource, ports)
+        
+        # What do we need to build?
+        needs = []
+        
+        # Check settlement - need 1 of each: wood, brick, sheep, wheat
+        missing_settlement = [r for r in ['wood', 'brick', 'sheep', 'wheat']
+                             if player.resources.get(r, 0) == 0]
+        if missing_settlement and len(missing_settlement) <= 2:  # Only trade if close to complete
+            needs.extend(missing_settlement)
+        
+        # Check city upgrade - need 2 wheat + 3 ore
+        if player.resources.get('wheat', 0) < 2:
+            needs.append('wheat')
+        if player.resources.get('ore', 0) < 3:
+            needs.extend(['ore'] * (3 - player.resources.get('ore', 0)))
+        
+        if not needs:
+            return None
+        
+        # What can we give up? (only abundant resources)
+        abundant = [r for r in RESOURCES if player.resources.get(r, 0) >= 3]
+        if not abundant:
+            return None
+        
+        # Trade priority: first missing resource that's needed
+        want = needs[0]
+        give = max(abundant, key=lambda r: player.resources.get(r, 0))
+        
+        # Check if we can trade at a reasonable ratio
+        ratio = player.can_trade_to_bank(give, want, ports)
         if ratio is None:
             return None
-
-        # More aggressive: trade even at 4:1 if we need it badly
-        if player.resources[give_resource] >= ratio:
+            
+        # GREED mode: only accept trades that are advantageous (give 1, get 2+)
+        if self.greed and ratio >= 1:  # ratio >= 1 means we have to give >=1 (bad deal in greed mode)
+            return None
+        
+        if player.resources.get(give, 0) >= ratio:
             return {
-                'give': give_resource,
-                'receive': want_resource,
+                'give': give,
+                'receive': want,
                 'ratio': ratio
             }
+        
         return None
 
     def choose_player_trade(self, game, pid):
-        """AGGRESSIVE: Always look for trades to complete buildings"""
+        """Find mutually beneficial trades - not just overpaying
+        Respects prob_trade and greed parameters
+        """
+        # Check if agent wants to trade this turn (based on prob_trade)
+        if random.random() > self.prob_trade:
+            return None
+            
         player = game.players[pid]
+        board = game.board
         
-        # Analyze what we need to build next
-        need_settlement = [r for r in ['wood', 'brick', 'sheep', 'wheat'] if player.resources.get(r, 0) == 0]
-        need_city = []
+        # What do we need?
+        settlement_needs = [r for r in ['wood', 'brick', 'sheep', 'wheat']
+                           if player.resources.get(r, 0) == 0]
+        city_needs = []
         if player.resources.get('wheat', 0) < 2:
-            need_city.append('wheat')
+            city_needs.append('wheat')
         if player.resources.get('ore', 0) < 3:
-            need_city.extend(['ore'] * (3 - player.resources.get('ore', 0)))
-
-        # Prioritize completing settlements (faster to build)
-        critical_needs = need_settlement if need_settlement else need_city
-
-        if critical_needs:
-            needed = critical_needs[0]
+            for _ in range(3 - player.resources.get('ore', 0)):
+                city_needs.append('ore')
+        
+        needs = settlement_needs if settlement_needs else city_needs
+        if not needs:
+            return None
+        
+        want = needs[0]  # What we want most
+        
+        # What do we have excess of? (not what we need)
+        abundant = [r for r in RESOURCES 
+                   if player.resources.get(r, 0) >= 2 and r != want]
+        
+        if not abundant:
+            return None
+        
+        # Find opponent who wants what we have AND has what we need
+        best_trade = None
+        best_score = -1
+        
+        for opponent_id in range(len(game.players)):
+            if opponent_id == pid:
+                continue
             
-            # Find a player with what we need
-            best_trade = None
-            best_score = -1
+            opponent = game.players[opponent_id]
             
-            for other in [p for i, p in enumerate(game.players) if i != pid]:
-                if other.resources.get(needed, 0) >= 1:
-                    # What can we give them?
-                    giveable = [r for r in RESOURCES if player.resources.get(r, 0) >= 2 and r != needed]
-                    if giveable:
-                        give_res = max(giveable, key=lambda r: player.resources.get(r, 0))
+            # Does opponent have what we want?
+            if opponent.resources.get(want, 0) == 0:
+                continue
+            
+            # Find what opponent might want from us
+            opp_settlements = [v for v, (p, t) in board.buildings.items()
+                             if p == opponent_id and t == 'settlement']
+            opp_cities = [v for v, (p, t) in board.buildings.items()
+                         if p == opponent_id and t == 'city']
+            
+            # What does opponent need?
+            opp_settlement_needs = [r for r in ['wood', 'brick', 'sheep', 'wheat']
+                                   if opponent.resources.get(r, 0) == 0]
+            opp_city_needs = []
+            if opponent.resources.get('wheat', 0) < 2:
+                opp_city_needs.append('wheat')
+            if opponent.resources.get('ore', 0) < 3:
+                opp_city_needs.append('ore')
+            
+            opp_needs = opp_settlement_needs if opp_settlement_needs else opp_city_needs
+            
+            # Look for trades where we both benefit
+            for give_res in abundant:
+                # Does opponent want what we offer?
+                if give_res in opp_needs:
+                    # This is a good trade! They get what they need, we get what we need
+                    # Fair ratio: 1:1 if it helps both build
+                    trade_score = 10  # High priority - mutual benefit
+                    ratio = 1
+                    
+                    if trade_score > best_score:
+                        best_score = trade_score
+                        best_trade = {
+                            'opponent': opponent_id,
+                            'give': give_res,
+                            'want': want,
+                            'ratio': ratio
+                        }
+                
+                # GREED mode: only unfavorable trades to opponent (give 1, get 1 is fair, we want 2+:1)
+                # In non-greed: allow slightly unfavorable trades (2:1)
+                elif opponent.resources.get(give_res, 0) == 0 and give_res not in opp_needs:
+                    if not self.greed:  # Only in non-greed mode
+                        # We give abundant resource, they give what we need
+                        # Slightly favorable to us, but still reasonable
+                        trade_score = 5
+                        ratio = 2  # 2:1 - slightly worse for them but still helps
                         
-                        # Score: how much they need what we're giving
-                        other_needs = [r for r in RESOURCES if other.resources.get(r, 0) <= 1]
-                        score = 1 if give_res in other_needs else 0
-                        score += other.resources.get(needed, 0)  # More valuable if they have more
-                        
-                        if score > best_score:
-                            best_score = score
-                            best_trade = (other.pid, give_res, needed)
+                        if trade_score > best_score:
+                            best_score = trade_score
+                            best_trade = {
+                                'opponent': opponent_id,
+                                'give': give_res,
+                                'want': want,
+                                'ratio': ratio
+                            }
+        
+        if best_trade:
+            give_res = best_trade['give']
+            want_res = best_trade['want']
+            ratio = best_trade['ratio']
             
-            if best_trade:
-                target_pid, give_res, receive_res = best_trade
-                give_amount = min(2, player.resources.get(give_res, 0) // 2)
+            if player.resources.get(give_res, 0) >= ratio:
                 return Action(
                     action='trade_player_offer',
                     target={
-                        'target_pid': target_pid,
+                        'target_pid': best_trade['opponent'],
                         'give_res': give_res,
-                        'give_amount': max(1, give_amount),
-                        'receive_res': receive_res,
+                        'give_amount': ratio,
+                        'receive_res': want_res,
                         'receive_amount': 1
                     }
                 )
-
-        # Opportunistic trading: clear excess
-        abundant = max([r for r in RESOURCES], key=lambda r: player.resources.get(r, 0))
-        if player.resources.get(abundant, 0) >= 3:
-            scarce = min([r for r in RESOURCES], key=lambda r: player.resources.get(r, 0))
-            if scarce != abundant and player.resources.get(scarce, 0) < 2:
-                for other in [p for i, p in enumerate(game.players) if i != pid]:
-                    if other.resources.get(scarce, 0) >= 1:
-                        return Action(
-                            action='trade_player_offer',
-                            target={
-                                'target_pid': other.pid,
-                                'give_res': abundant,
-                                'give_amount': 2,
-                                'receive_res': scarce,
-                                'receive_amount': 1
-                            }
-                        )
-
+        
         return None

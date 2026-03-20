@@ -9,6 +9,6 @@ POINTS_DIC={"road":0,"colony":1,"city":2}
 
 RESOURCES = ["wood", "brick", "sheep", "wheat", "ore"]
 
-VICTORY_POINTS_TO_WIN = 4
+VICTORY_POINTS_TO_WIN = 10
 
 

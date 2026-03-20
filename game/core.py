@@ -1,5 +1,3 @@
- # core.py - Turn management, victory conditions
-
 import random
 
 from collections import defaultdict, Counter
@@ -55,92 +53,119 @@ class CatanGame:
  
 
     def setup(self):
-
+        """
+        Strategic Catan setup - use agent vertex evaluation:
+        - Round 1: Players 0,1,2,3 each place a settlement and road + COLLECT RESOURCES
+        - Round 2: Players 3,2,1,0 each place a settlement and road + COLLECT RESOURCES
+        
+        Settlements placed on best vertices (high probability numbers, resource diversity)
+        """
+        from game.map import get_corners
+        
         all_vertices = list(self.board.get_all_vertices())
-
-        random.shuffle(all_vertices)
-
         placed_vertices = set()
+        
+        def score_vertex(v):
+            """Score vertex: best numbers (5,6,8,9) + diversity bonus"""
+            score = 0.0
+            resources_present = set()
+            
+            for hex_pos, tile in self.board.hexes.items():
+                if v in get_corners(*hex_pos):
+                    if tile.number:
+                        if tile.number in [6, 8]:
+                            score += 3.0
+                        elif tile.number in [5, 9]:
+                            score += 2.0
+                        elif tile.number in [4, 10]:
+                            score += 1.0
+                        else:
+                            score += 0.1
+                    if tile.resource != 'desert':
+                        resources_present.add(tile.resource)
+            
+            # Heavy bonus for resource diversity
+            diversity = len(resources_present)
+            score += diversity * 2.0
+            
+            return score
 
- 
-
+        # ROUND 1: Forward order (best available vertex for each player)
         for pid in range(self.num_players):
-
             player = self.players[pid]
-
-            count = 0
-
-            attempts = 0
-
-            while count < 2 and attempts < len(all_vertices) * 2:
-
-                attempts += 1
-
-                if not all_vertices:
-
-                    break
-
-                v = all_vertices.pop(0)
-
-                valid = all(
-
-                    self.board.approx_distance(v, existing_v) >= 2
-
-                    for existing_v in placed_vertices
-
-                )
-
-                if valid:
-
-                    if self.board.place_settlement(pid, v):
-
-                        player.build_settlement(free_cost=True)
-
-                        placed_vertices.add(v)
-
-                        print(f"J{pid} settlement {count + 1}/2 on {v}")
-
-                        if count == 0:
-
-                            produced = self.board.produce_from_vertex(v)
-
-                            if produced:
-
-                                player.add_resources(produced)
-
-                        count += 1
-
-                else:
-
-                    all_vertices.append(v)
-
- 
-
-            # 2 routes initiales gratuites
-
+            
+            # Find best valid vertex among remaining
+            best_v = None
+            best_score = -1
+            
+            for v in all_vertices:
+                if v in placed_vertices:
+                    continue
+                
+                # Check 1-edge distance: can't have settlements on adjacent vertices
+                neighbors = set(self.board.vertex_neighbors.get(v, []))
+                has_adjacent = any(pv in neighbors for pv in placed_vertices)
+                if not has_adjacent:
+                    v_score = score_vertex(v)
+                    if v_score > best_score:
+                        best_score = v_score
+                        best_v = v
+            
+            if best_v:
+                if self.board.place_settlement(pid, best_v):
+                    player.build_settlement(free_cost=True)
+                    placed_vertices.add(best_v)
+                    all_vertices.remove(best_v)
+                    print(f"J{pid} settlement 1/2 on {best_v} (score: {best_score:.1f})")
+                    
+                    produced = self.board.produce_from_vertex(best_v)
+                    if produced:
+                        player.add_resources(produced)
+            
+            # Place 1 road
             possible_roads = self.board.get_possible_roads(pid)
+            if possible_roads:
+                edge = random.choice(possible_roads)
+                self.board.place_road(pid, edge)
+                player.build_road(free_cost=True)
 
-            for _ in range(2):
-
-                if possible_roads:
-
-                    edge = random.choice(possible_roads)
-
-                    self.board.place_road(pid, edge)
-
-                    player.build_road(free_cost=True)
-
-                    print(f"J{pid} road on {list(edge)}")
-
-                    possible_roads = self.board.get_possible_roads(pid)
-
- 
-
-            # Bootstrap resources: give each player 2 of each resource to help get started
-
-            bootstrap = Counter(wood=4, brick=3, sheep=3, wheat=3, ore=2)
-
-            player.add_resources(bootstrap)
+        # ROUND 2: Reverse order (strategic placement)
+        for pid in range(self.num_players - 1, -1, -1):
+            player = self.players[pid]
+            
+            best_v = None
+            best_score = -1
+            
+            for v in all_vertices:
+                if v in placed_vertices:
+                    continue
+                
+                # Check 1-edge distance: can't have settlements on adjacent vertices
+                neighbors = set(self.board.vertex_neighbors.get(v, []))
+                has_adjacent = any(pv in neighbors for pv in placed_vertices)
+                if not has_adjacent:
+                    v_score = score_vertex(v)
+                    if v_score > best_score:
+                        best_score = v_score
+                        best_v = v
+            
+            if best_v:
+                if self.board.place_settlement(pid, best_v):
+                    player.build_settlement(free_cost=True)
+                    placed_vertices.add(best_v)
+                    all_vertices.remove(best_v)
+                    print(f"J{pid} settlement 2/2 on {best_v} (score: {best_score:.1f})")
+                    
+                    produced = self.board.produce_from_vertex(best_v)
+                    if produced:
+                        player.add_resources(produced)
+            
+            # Place 1 road
+            possible_roads = self.board.get_possible_roads(pid)
+            if possible_roads:
+                edge = random.choice(possible_roads)
+                self.board.place_road(pid, edge)
+                player.build_road(free_cost=True)
 
  
 
@@ -550,35 +575,43 @@ class CatanGame:
 
         else:
 
-            # Simple heuristic: what do we need vs what we're giving
+            # With scarce resources, be more willing to trade
 
-            target_needs_give = (target.resources[give_res] <= 1)  # target is low on what we're giving
+            target_needs_give = (target.resources[give_res] <= 1)
 
-            target_needs_receive = (target.resources[receive_res] <= 1)  # target is low on what they're receiving
+            target_needs_receive = (target.resources[receive_res] <= 2)  # More lenient threshold
+
+            target_has_enough_give = (target.resources[give_res] >= 2)
 
             
 
-            if target_needs_give and not target_needs_receive:
+            if target_has_enough_give and target_needs_receive:
 
-                # Target has what they need, doesn't need what we're giving - reject
-
-                accept = False
-
-            elif not target_needs_give and target_needs_receive:
-
-                # Target needs what we're giving and doesn't have what we want - accept
+                # Target has abundance and wants what we offer - YES
 
                 accept = True
 
+            elif target_needs_give and not target_needs_receive:
+
+                # Target needs what we're giving but doesn't need what we want - NO
+
+                accept = False
+
             elif target_needs_give and target_needs_receive:
 
-                # Both benefit - accept with higher probability
+                # Both benefit - high probability YES (resources are scarce)
 
-                accept = random.random() < 0.8
+                accept = random.random() < 0.85
+
+            elif target_has_enough_give:
+
+                # Target has extras - allow trade
+
+                accept = random.random() < 0.6
 
             else:
 
-                # Both have plenty - reject
+                # Neutral - slight rejection
 
                 accept = random.random() < 0.3
 

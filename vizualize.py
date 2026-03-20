@@ -1,84 +1,107 @@
-# gui.py
 import pygame
 import math
 import sys
 from game.board import Board,COLORS,PLAYER_COLORS
 
-def draw_board(game):
+def draw_board(game, max_turns=150):
     pygame.init()
-    screen = pygame.display.set_mode((1400, 1000))  # ← un peu plus grand pour mieux voir
-    pygame.display.set_caption("Catan - Simulation corrigée")
+    screen = pygame.display.set_mode((1400, 1000))
+    pygame.display.set_caption("Catan - Smart Agent Game")
     clock = pygame.time.Clock()
 
     font = pygame.font.SysFont('arial', 32, bold=True)
     small_font = pygame.font.SysFont('arial', 20)
 
+    board = game.board
     running = True
-    while running:
+    auto_play = False  # Press 'A' to auto-play
+    
+    while running and game.winner is None and game.turn_number < max_turns:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
-                    game.play_one_turn()
-                    print(f"Tour {game.turn_number} terminé")
+                    if not auto_play:
+                        game.play_one_turn()
+                if event.key == pygame.K_a:
+                    auto_play = not auto_play
+                if event.key == pygame.K_q:
+                    running = False
+
+        # Auto-play 
+        if auto_play:
+            if game.winner is None and game.turn_number < max_turns:
+                game.play_one_turn()
 
         screen.fill((10, 20, 50))
 
-        data = game.board.get_render_data()
-
-        # 1. Dessin des hexagones
-        for pos, center in data['hex_centers'].items():
-            tile = data['hex_tiles'][pos]
+        # Draw hexagons
+        for pos, center in board.hex_centers.items():
+            tile = board.hexes[pos]
             color = COLORS.get(tile.resource, COLORS['water'])
-            pygame.draw.polygon(screen, color, data['hex_polygons'][pos])
-            pygame.draw.polygon(screen, (60,60,80), data['hex_polygons'][pos], 4)  # bord plus visible
+            pygame.draw.polygon(screen, color, board.hex_polygons[pos])
+            pygame.draw.polygon(screen, (60, 60, 80), board.hex_polygons[pos], 4)
 
             if tile.number:
-                col = (220,0,0) if tile.number in (6,8) else (255,255,255)
+                col = (220, 0, 0) if tile.number in (6, 8) else (255, 255, 255)
                 num = font.render(str(tile.number), True, col)
                 screen.blit(num, (center[0] - num.get_width()//2, center[1] - num.get_height()//2))
 
-            if pos == data['robber_pos']:
-                pygame.draw.circle(screen, (0,0,0), (int(center[0]), int(center[1])), 28)
+            # Draw robber
+            if pos == board.robber_pos:
+                pygame.draw.circle(screen, (0, 0, 0), (int(center[0]), int(center[1])), 28)
 
-        # 2. Routes (traits épais sur les arêtes)
-        for edge, pid in data['roads'].items():
+        # Draw roads
+        for edge, pid in board.roads.items():
             v1, v2 = list(edge)
-            x1, y1 = data['vertex_to_pixel'](*v1)
-            x2, y2 = data['vertex_to_pixel'](*v2)
+            x1, y1 = board.vertex_to_pixel(v1[0], v1[1])
+            x2, y2 = board.vertex_to_pixel(v2[0], v2[1])
             color = PLAYER_COLORS[pid % len(PLAYER_COLORS)]
-            pygame.draw.line(screen, color, (x1,y1), (x2,y2), 16)
-            pygame.draw.line(screen, (255,255,255), (x1,y1), (x2,y2), 4)  # contour blanc pour mieux voir
+            pygame.draw.line(screen, color, (x1, y1), (x2, y2), 16)
+            pygame.draw.line(screen, (255, 255, 255), (x1, y1), (x2, y2), 4)
 
-        # 3. Bâtiments (villages et villes)
-        for vkey, (pid, btype) in data['buildings'].items():
-            x, y = data['vertex_to_pixel'](*vkey)
+        # Draw buildings
+        for vkey, (pid, btype) in board.buildings.items():
+            x, y = board.vertex_to_pixel(vkey[0], vkey[1])
             size = 18 if btype == 'settlement' else 26
             color = PLAYER_COLORS[pid % len(PLAYER_COLORS)]
             pygame.draw.circle(screen, color, (int(x), int(y)), size)
-            pygame.draw.circle(screen, (255,255,255), (int(x), int(y)), size + 4, 4)  # contour blanc
+            pygame.draw.circle(screen, (255, 255, 255), (int(x), int(y)), size + 4, 4)
 
-        # 4. Ports (sur les arêtes extérieures)
-        for port in data['ports']:
-            cx, cy = port['center']
-            ptype = port['type']
-            color = (220, 220, 180) if ptype == 'generic' else COLORS.get(ptype, (200,200,200))
-            pygame.draw.circle(screen, color, (int(cx), int(cy)), 20)
-            pygame.draw.circle(screen, (0,0,0), (int(cx), int(cy)), 20, 4)
-
-            label = small_font.render(ptype.upper()[:5], True, (0,0,0))
-            screen.blit(label, (cx - label.get_width()//2, cy - 35))
-
-        # HUD ressources
+        # HUD - Player info
         y = 20
-        for p in game.players:
-            txt = f"J{p.pid}: {p.victory_points} pts  |  {dict(p.resources)}"
-            surf = font.render(txt, True, PLAYER_COLORS[p.pid % len(PLAYER_COLORS)])
+        for pid in range(game.num_players):
+            p = game.players[pid]
+            txt = f"J{p.pid}: {p.victory_points}pts | {dict(p.resources)}"
+            surf = small_font.render(txt, True, PLAYER_COLORS[pid % len(PLAYER_COLORS)])
             screen.blit(surf, (20, y))
-            y += 40
+            y += 30
+
+        # Turn and status info
+        turn_txt = f"Turn: {game.turn_number}/{max_turns}"
+        turn_surf = font.render(turn_txt, True, (255, 255, 255))
+        screen.blit(turn_surf, (20, y + 20))
+        
+        if game.winner is not None:
+            winner_txt = f"WINNER: Player {game.winner}!"
+            winner_surf = font.render(winner_txt, True, (255, 215, 0))
+            screen.blit(winner_surf, (400, 400))
+        
+        # Controls
+        controls = "SPACE: Step  |  A: Auto-play  |  Q: Quit"
+        ctrl_surf = small_font.render(controls, True, (200, 200, 200))
+        screen.blit(ctrl_surf, (20, 900))
 
         pygame.display.flip()
-        clock.tick(30)
+        clock.tick(30 if auto_play else 10)  # Slower when manual, faster for auto
+
+    # Show final result
+    if game.winner is not None:
+        print(f"\n=== GAME OVER ===")
+        print(f"WINNER: Player {game.winner}!")
+        print(f"Turn {game.turn_number}")
+    else:
+        print(f"\nGame reached turn limit ({max_turns})")
 
     pygame.quit()
