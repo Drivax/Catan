@@ -5,6 +5,8 @@
 This project is a full Catan simulation written in Python.
 It was built to run many games quickly and compare agent strategies in a controlled way.
 
+![Catan board overview](catan1.PNG)
+
 The core goal is practical: measure behavior, tune decision parameters, and understand which heuristics actually help in a 4-player game.
 The codebase includes a complete game engine, baseline and heuristic agents, a fine-tuning loop, and visual tools.
 
