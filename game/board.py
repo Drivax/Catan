@@ -278,19 +278,19 @@ class Board:
 
     def vertex_to_pixel(self, vq, vr):
 
-        """Convertit des coordonnees de vertex (double-coord) en pixels."""
+        """Convert vertex key (vq, vr) from get_corners() to screen pixels.
 
-        q = vq / 2.0
+        Derived from the flat-top hex geometry:
+            x = vq * HEX_RADIUS / 2 + OFFSET_X
+            y = vr * HEX_RADIUS * sqrt(3) / 2 + OFFSET_Y
+        Aligns exactly with _compute_hex_points() corner positions.
+        """
 
-        r = vr / 2.0
+        x = vq * HEX_RADIUS / 2 + OFFSET_X
 
-        x = HEX_RADIUS * (3 / 2 * q)
+        y = vr * HEX_RADIUS * math.sqrt(3) / 2 + OFFSET_Y
 
-        y = HEX_RADIUS * math.sqrt(3) * (r + q / 2.0)
-
-        # FIX: utiliser le meme offset que axial_to_pixel pour l'alignement
-
-        return x + OFFSET_X, y + OFFSET_Y
+        return x, y
 
  
 
@@ -302,7 +302,7 @@ class Board:
 
         for i in range(6):
 
-            angle_rad = math.radians(60 * i + 30)
+            angle_rad = math.radians(60 * i)  # flat-top: 0°=right, consistent with axial formula
 
             px = center_x + HEX_RADIUS * math.cos(angle_rad)
 
@@ -376,11 +376,35 @@ class Board:
 
     def approx_distance(self, v1, v2):
 
-        q1, r1 = v1
+        """Exact graph distance between two vertices on the board lattice."""
 
-        q2, r2 = v2
+        from collections import deque
 
-        return max(abs(q1 - q2), abs(r1 - r2), abs((q1 + r1) - (q2 + r2))) // 2
+        if v1 == v2:
+
+            return 0
+
+        visited = {v1}
+
+        bfs = deque([(v1, 0)])
+
+        while bfs:
+
+            curr, d = bfs.popleft()
+
+            for nb in self.vertex_neighbors.get(curr, []):
+
+                if nb == v2:
+
+                    return d + 1
+
+                if nb not in visited:
+
+                    visited.add(nb)
+
+                    bfs.append((nb, d + 1))
+
+        return 9999
 
  
 

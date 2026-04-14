@@ -35,19 +35,22 @@ CORNER_FRAC_OFFSETS = [
 ]
 
 def get_corners(q, r):
+    """Return 6 shared vertex keys for a flat-top axial hex at (q, r).
+
+    Keys are integer tuples (vq, vr) that convert to screen pixels via:
+        x = vq * HEX_RADIUS / 2 + OFFSET_X
+        y = vr * HEX_RADIUS * sqrt(3) / 2 + OFFSET_Y
+
+    Adjacent hexes share the EXACT same key for every shared corner,
+    guaranteeing roads and buildings render at the correct hex-edge positions.
+    Corner order matches _compute_hex_points() angle order (60*i, flat-top).
     """
-    Retourne 6 vertices en coordonnées entières (q×2, r×2 style)
-    Compatible avec layout axial flat-top standard Catan
-    """
-    # Multiplie par 2 pour avoir des entiers et forcer partage
-    qq = q * 2
-    rr = r * 2
-    
+    s = q + 2 * r
     return [
-        (qq + 2, rr + 0),     # NE
-        (qq + 1, rr - 1),     # E
-        (qq    , rr - 2),     # SE
-        (qq - 2, rr    ),     # SW
-        (qq - 1, rr + 1),     # W
-        (qq    , rr + 2),     # NW
+        (3*q + 2, s),      # i=0: East  (right tip, 0 deg)
+        (3*q + 1, s + 1),  # i=1: SE               (60 deg)
+        (3*q - 1, s + 1),  # i=2: SW              (120 deg)
+        (3*q - 2, s),      # i=3: West (left tip, 180 deg)
+        (3*q - 1, s - 1),  # i=4: NW              (240 deg)
+        (3*q + 1, s - 1),  # i=5: NE              (300 deg)
     ]

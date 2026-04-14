@@ -47,13 +47,13 @@ def main():
         SmartAgent(), 
         SmartAgent() 
     ]
-    compare_agents(agents_config, num_games=500, max_turns=500)
+    # compare_agents(agents_config, num_games=500, max_turns=500)
     
     
     # Alternative: Regular game with visualization
-    # agents = [SmartAgent() for _ in range(4)]
-    # game = CatanGame(agents=agents, num_players=4, verbose=True)
-    # vizualize.draw_board(game, max_turns=150)
+    agents = [SmartAgent() for _ in range(4)]
+    game = CatanGame(agents=agents, num_players=4, verbose=True)
+    vizualize.draw_board(game, max_turns=150)
 
 if __name__ == "__main__":
     main()
