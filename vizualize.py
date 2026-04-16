@@ -21,6 +21,76 @@ RESOURCE_STYLES = {
 }
 
 
+def shift_color(color, delta):
+    return tuple(max(0, min(255, channel + delta)) for channel in color)
+
+
+def inset_polygon(points, center, factor):
+    cx, cy = center
+    return [
+        (
+            cx + (point[0] - cx) * factor,
+            cy + (point[1] - cy) * factor,
+        )
+        for point in points
+    ]
+
+
+def draw_hex_texture(screen, resource, center):
+    cx, cy = int(center[0]), int(center[1])
+    accent = {
+        "wood": (44, 98, 54),
+        "brick": (129, 58, 46),
+        "sheep": (101, 146, 74),
+        "wheat": (187, 149, 38),
+        "ore": (83, 89, 104),
+        "desert": (176, 147, 105),
+    }.get(resource, (90, 115, 160))
+
+    if resource == "wood":
+        for offset in (-16, -6, 4, 14):
+            pygame.draw.line(screen, accent, (cx - 24, cy + offset), (cx + 24, cy + offset - 6), 2)
+    elif resource == "brick":
+        for row in range(3):
+            y = cy - 16 + row * 12
+            pygame.draw.line(screen, accent, (cx - 24, y), (cx + 24, y), 2)
+        for col in (-16, 0, 16):
+            pygame.draw.line(screen, accent, (cx + col, cy - 16), (cx + col, cy + 8), 2)
+    elif resource == "sheep":
+        pygame.draw.circle(screen, accent, (cx - 10, cy - 4), 9, 2)
+        pygame.draw.circle(screen, accent, (cx + 2, cy - 6), 9, 2)
+        pygame.draw.circle(screen, accent, (cx + 13, cy - 2), 9, 2)
+    elif resource == "wheat":
+        pygame.draw.line(screen, accent, (cx - 4, cy + 14), (cx - 4, cy - 16), 2)
+        pygame.draw.line(screen, accent, (cx + 4, cy + 14), (cx + 4, cy - 16), 2)
+        for step in range(5):
+            y = cy - 12 + step * 6
+            pygame.draw.line(screen, accent, (cx - 11, y + 2), (cx - 4, y - 1), 2)
+            pygame.draw.line(screen, accent, (cx + 11, y + 2), (cx + 4, y - 1), 2)
+    elif resource == "ore":
+        pygame.draw.polygon(screen, accent, [(cx - 14, cy + 8), (cx - 2, cy - 14), (cx + 12, cy - 2), (cx + 2, cy + 14)], 2)
+        pygame.draw.line(screen, accent, (cx - 2, cy - 14), (cx + 2, cy + 14), 2)
+    elif resource == "desert":
+        pygame.draw.arc(screen, accent, (cx - 20, cy - 8, 22, 18), 3.14, 6.1, 2)
+        pygame.draw.arc(screen, accent, (cx - 2, cy - 2, 24, 16), 3.14, 6.1, 2)
+
+
+def draw_stylized_hex(screen, polygon, center, resource):
+    base_color = COLORS.get(resource, COLORS["water"])
+    shadow = [(point[0] + 4, point[1] + 5) for point in polygon]
+    pygame.draw.polygon(screen, (20, 26, 38), shadow)
+
+    pygame.draw.polygon(screen, shift_color(base_color, -8), polygon)
+    inner = inset_polygon(polygon, center, 0.92)
+    pygame.draw.polygon(screen, base_color, inner)
+
+    highlight = inset_polygon(polygon, center, 0.82)
+    pygame.draw.polygon(screen, shift_color(base_color, 18), highlight, 2)
+    pygame.draw.polygon(screen, (241, 236, 222), polygon, 2)
+
+    draw_hex_texture(screen, resource, center)
+
+
 def draw_vertical_gradient(screen, top_color, bottom_color):
     height = screen.get_height()
     width = screen.get_width()
@@ -137,6 +207,17 @@ def draw_board(game, max_turns=150):
     }
 
     board = game.board
+    centers = list(board.hex_centers.values())
+    min_x = min(point[0] for point in centers)
+    max_x = max(point[0] for point in centers)
+    min_y = min(point[1] for point in centers)
+    max_y = max(point[1] for point in centers)
+    board_aura_rect = pygame.Rect(
+        int(min_x - 210),
+        int(min_y - 175),
+        int((max_x - min_x) + 420),
+        int((max_y - min_y) + 350),
+    )
 
     # Pre-collect all unique vertex keys for settlement-spot display
     all_vertices = set()
@@ -166,13 +247,13 @@ def draw_board(game, max_turns=150):
         draw_vertical_gradient(screen, (10, 19, 34), (33, 49, 82))
         pygame.draw.circle(screen, (24, 40, 68), (180, 160), 150)
         pygame.draw.circle(screen, (14, 31, 56), (920, 860), 180)
+        pygame.draw.ellipse(screen, (18, 44, 79), board_aura_rect)
+        pygame.draw.ellipse(screen, (89, 124, 171), board_aura_rect, 3)
 
         # --- Draw hexagons ---
         for pos, center in board.hex_centers.items():
             tile = board.hexes[pos]
-            color = COLORS.get(tile.resource, COLORS['water'])
-            pygame.draw.polygon(screen, color, board.hex_polygons[pos])
-            pygame.draw.polygon(screen, (233, 229, 219), board.hex_polygons[pos], 3)
+            draw_stylized_hex(screen, board.hex_polygons[pos], center, tile.resource)
 
             if tile.number:
                 pygame.draw.circle(screen, (24, 31, 42), (int(center[0]), int(center[1])), 28)
@@ -183,7 +264,9 @@ def draw_board(game, max_turns=150):
                                   center[1] - num.get_height() // 2))
 
             if pos == board.robber_pos:
-                pygame.draw.circle(screen, (15, 15, 15), (int(center[0]), int(center[1])), 30, 4)
+                pygame.draw.circle(screen, (14, 14, 14), (int(center[0]), int(center[1])), 32)
+                pygame.draw.circle(screen, (220, 220, 220), (int(center[0]), int(center[1])), 30, 3)
+                pygame.draw.circle(screen, (35, 35, 35), (int(center[0]), int(center[1])), 10)
 
         # --- Draw all empty settlement spots as small squares (reference style) ---
         sq = 7
